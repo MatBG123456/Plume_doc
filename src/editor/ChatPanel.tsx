@@ -10,6 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 // à la fin de l'échange. Les erreurs sont affichées par le toast global (Editor,
 // via l'event `chat_error`).
 
+type Provider = "api" | "cli";
 type Block = { type: string; text?: string; name?: string };
 type ChatMessage = { role: string; content: Block[] | unknown };
 
@@ -27,6 +28,7 @@ function toDisplay(m: ChatMessage): Display | null {
     return { role: "user", text, tools: [] };
   }
   const tools = blocks.filter((b) => b.type === "tool_use").map((b) => b.name ?? "op");
+  if (text.trim() === "" && tools.length === 0) return null; // pas de bulle vide
   return { role: "assistant", text, tools };
 }
 
@@ -63,6 +65,10 @@ export function ChatPanel() {
   const [streaming, setStreaming] = useState("");
   const [liveTurns, setLiveTurns] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [providers, setProviders] = useState({ api_key: false, claude_cli: false });
+  const [provider, setProvider] = useState<Provider>(
+    () => (localStorage.getItem("plume.chatProvider") as Provider | null) ?? "api",
+  );
   const streamingRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -71,6 +77,18 @@ export function ChatPanel() {
     setStreaming("");
     setLiveTurns([]);
   }
+
+  function chooseProvider(p: Provider) {
+    setProvider(p);
+    localStorage.setItem("plume.chatProvider", p);
+  }
+
+  // Détecte ce qui est disponible (clé API ? binaire `claude` ?).
+  useEffect(() => {
+    invoke<{ api_key: boolean; claude_cli: boolean }>("detect_chat_providers")
+      .then(setProviders)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const subs = [
@@ -108,7 +126,7 @@ export function ChatPanel() {
     resetLive();
     setBusy(true);
     try {
-      const updated = await invoke<ChatMessage[]>("chat_send", { messages: next });
+      const updated = await invoke<ChatMessage[]>("chat_send", { messages: next, provider });
       setMessages(updated);
     } catch {
       // L'erreur est déjà signalée par l'event `chat_error` (toast global).
@@ -122,8 +140,30 @@ export function ChatPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-neutral-200 px-4 py-2.5 text-sm font-semibold tracking-tight">
-        Assistant
+      <div className="border-b border-neutral-200 px-4 py-2">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold tracking-tight">Assistant</span>
+          <select
+            value={provider}
+            onChange={(e) => chooseProvider(e.target.value as Provider)}
+            className="rounded border border-neutral-200 bg-white px-1.5 py-1 text-xs text-neutral-600 outline-none"
+          >
+            <option value="api">Clé API</option>
+            <option value="cli">Claude Code (local)</option>
+          </select>
+        </div>
+        {provider === "api" && !providers.api_key && (
+          <p className="mt-1 text-[11px] text-amber-600">
+            Définis <code>ANTHROPIC_API_KEY</code> avant de lancer l'app.
+          </p>
+        )}
+        {provider === "cli" && (
+          <p className="mt-1 text-[11px] text-neutral-500">
+            {providers.claude_cli
+              ? "Via ton « claude » local (ton abonnement/auth) — vérifie les CGU pour ton usage."
+              : "⚠ « claude » introuvable : installe Claude Code, ou choisis « Clé API »."}
+          </p>
+        )}
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">

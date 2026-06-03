@@ -11,11 +11,14 @@
 //! `op_applied` (op appliquée + nouveau document, pour la preview live),
 //! `assistant_done`, `chat_error`.
 
+use std::process::Stdio;
+
 use futures_util::StreamExt;
 use plume_core::{apply, Document, Op};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
+use tokio::io::AsyncWriteExt;
 
 use crate::Shared;
 
@@ -197,22 +200,10 @@ fn tool_use_to_op(name: &str, input: &Value) -> Result<Op, String> {
 // Application d'un outil via le pipeline pur (mutation du document partagé)
 // ---------------------------------------------------------------------------
 
-/// Applique un `tool_use`. Renvoie `(contenu du tool_result, is_error)`.
-fn apply_tool(app: &AppHandle, state: &Shared, name: &str, input: &Value) -> (String, bool) {
-    let op = match tool_use_to_op(name, input) {
-        Ok(op) => op,
-        Err(reason) => return (json!({ "ok": false, "reason": reason }).to_string(), true),
-    };
-
-    let mut s = match state.lock() {
-        Ok(s) => s,
-        Err(e) => {
-            return (
-                json!({ "ok": false, "reason": e.to_string() }).to_string(),
-                true,
-            )
-        }
-    };
+/// Applique une `Op` validée au document partagé et émet `op_applied`. Cœur
+/// **partagé** par les providers API et CLI.
+fn apply_validated_op(app: &AppHandle, state: &Shared, op: Op, label: &str) -> Result<(), String> {
+    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
     match apply(&mut s.doc, op) {
         Ok(inverse) => {
             s.undo.push(inverse);
@@ -220,13 +211,25 @@ fn apply_tool(app: &AppHandle, state: &Shared, name: &str, input: &Value) -> (St
             s.last_edit = None; // op agent discrète : pas de coalescing avec la frappe
             let doc = s.doc.clone();
             drop(s); // ne jamais tenir le verrou pendant l'émission/await
-            let _ = app.emit("op_applied", json!({ "doc": doc, "op": name }));
-            (json!({ "ok": true }).to_string(), false)
+            let _ = app.emit("op_applied", json!({ "doc": doc, "op": label }));
+            Ok(())
         }
         Err(e) => {
             drop(s);
-            (json!({ "ok": false, "reason": e.reason }).to_string(), true)
+            Err(e.reason)
         }
+    }
+}
+
+/// Applique un `tool_use` (chemin API). Renvoie `(contenu du tool_result, is_error)`.
+fn apply_tool(app: &AppHandle, state: &Shared, name: &str, input: &Value) -> (String, bool) {
+    let op = match tool_use_to_op(name, input) {
+        Ok(op) => op,
+        Err(reason) => return (json!({ "ok": false, "reason": reason }).to_string(), true),
+    };
+    match apply_validated_op(app, state, op, name) {
+        Ok(()) => (json!({ "ok": true }).to_string(), false),
+        Err(reason) => (json!({ "ok": false, "reason": reason }).to_string(), true),
     }
 }
 
@@ -504,21 +507,353 @@ async fn run_agent(
     messages
 }
 
-/// Command : envoie l'historique au modèle, exécute la boucle agent (streaming +
-/// application des ops), et renvoie l'historique mis à jour (toujours cohérent
-/// avec le document, même si un tour a échoué).
+// ---------------------------------------------------------------------------
+// Provider « Claude Code (CLI local) »
+// ---------------------------------------------------------------------------
+//
+// Délègue au binaire `claude` que l'utilisateur a lui-même installé et
+// authentifié : la consommation passe par SON auth (abonnement ou sa propre
+// clé). ⚠️ Conformité : router des requêtes via un abonnement Pro/Max est
+// encadré par les CGU d'Anthropic (usage interactif). Ce provider est optionnel,
+// désactivé par défaut, et chacun branche SON propre `claude` — à l'utilisateur
+// de vérifier les CGU pour son usage.
+
+/// Disponibilité des providers de chat (pour que le front propose le bon choix).
+#[derive(Debug, Serialize)]
+pub struct ChatProviders {
+    pub api_key: bool,
+    pub claude_cli: bool,
+}
+
+/// Noms de binaire à essayer. Sous Windows, une install npm de Claude Code crée
+/// des shims `claude.cmd` / `claude.ps1` (pas de `.exe`).
+fn claude_candidates() -> &'static [&'static str] {
+    if cfg!(windows) {
+        &[
+            "claude.exe",
+            "claude.cmd",
+            "claude.bat",
+            "claude.ps1",
+            "claude",
+        ]
+    } else {
+        &["claude"]
+    }
+}
+
+/// Localise le binaire `claude` : override `PLUME_CLAUDE_BIN`, puis `~/.local/bin`,
+/// puis le `PATH` (en essayant chaque nom candidat).
+fn find_claude() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("PLUME_CLAUDE_BIN") {
+        let pb = std::path::PathBuf::from(p);
+        if pb.is_file() {
+            return Some(pb);
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+        let bin = std::path::Path::new(&home).join(".local").join("bin");
+        for name in claude_candidates() {
+            let pb = bin.join(name);
+            if pb.is_file() {
+                return Some(pb);
+            }
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            for name in claude_candidates() {
+                let pb = dir.join(name);
+                if pb.is_file() {
+                    return Some(pb);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Commande pour lancer `claude`, en passant par `cmd.exe` / `powershell` pour les
+/// shims `.cmd`/`.bat`/`.ps1` (que `CreateProcess` ne lance pas directement).
+fn claude_command(path: &std::path::Path) -> tokio::process::Command {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("cmd") | Some("bat") => {
+            let mut c = tokio::process::Command::new("cmd");
+            c.arg("/C").arg(path);
+            c
+        }
+        Some("ps1") => {
+            let mut c = tokio::process::Command::new("powershell");
+            c.arg("-NoProfile")
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-File")
+                .arg(path);
+            c
+        }
+        _ => tokio::process::Command::new(path),
+    }
+}
+
+/// Détecte les providers disponibles (clé API définie ? `claude` installé ?).
+#[tauri::command]
+pub fn detect_chat_providers() -> ChatProviders {
+    ChatProviders {
+        api_key: std::env::var("ANTHROPIC_API_KEY")
+            .map(|k| !k.is_empty())
+            .unwrap_or(false),
+        claude_cli: find_claude().is_some(),
+    }
+}
+
+/// Description concise des ops pour le prompt CLI (le modèle répond en JSON brut).
+const OPS_HELP: &str = r##"Chaque op est un objet JSON avec un champ "op" :
+- {"op":"InsertBlock","at":<int>,"block":{"id":"<id unique nouveau>","node":<Node>}}
+- {"op":"DeleteBlock","id":"<id>"}
+- {"op":"MoveBlock","id":"<id>","to":<int>}
+- {"op":"SetNode","id":"<id>","node":<Node>}
+- {"op":"SetRuns","id":"<id>","runs":[<Run>]}
+- {"op":"ApplyMark","id":"<id>","range":[<début>,<fin>],"mark":<MarkPatch>}
+- {"op":"SetTableCell","id":"<id>","row":<int>,"col":<int>,"runs":[<Run>]}
+- {"op":"SetMeta","title":<string|null>,"lang":<string|null>}
+Node (clé "type") : Paragraph{runs} | Heading{level 1..6, runs} | ListItem{ordered, level 0..5, runs} | Quote{runs} | CodeBlock{lang(string|null), text} | Table{rows:[[Cell]]} | Image{src, alt, width_pct(int|null)} | PageBreak.
+Run : {"text":string,"marks":{"bold":bool,"italic":bool,"underline":bool,"strike":bool,"code":bool,"link":string|null,"color":"#RRGGBB"|null}}.
+Cell : {"runs":[Run]}. MarkPatch : champs optionnels bold/italic/underline/strike/code (bool), link/color (string ou null=effacer).
+range d'ApplyMark = [début, fin) en caractères du texte concaténé des runs du bloc."##;
+
+/// Texte d'un message (blocs `text`), préfixé par le rôle ; `None` si vide.
+///
+/// Les blocs `tool_use`/`tool_result` (issus du chemin API) sont ignorés : en
+/// cas de bascule API→CLI, le fil textuel suffit car le **document courant**
+/// (injecté dans le prompt) reste la source de vérité.
+fn message_text(m: &ChatMessage) -> Option<String> {
+    let text: String = m
+        .content
+        .as_array()?
+        .iter()
+        .filter(|b| b["type"] == "text")
+        .filter_map(|b| b["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("");
+    if text.trim().is_empty() {
+        return None;
+    }
+    let who = if m.role == "assistant" {
+        "Assistant"
+    } else {
+        "Utilisateur"
+    };
+    Some(format!("{who}: {text}"))
+}
+
+/// Construit le prompt unique envoyé à `claude -p` (sortie attendue : UN objet JSON).
+fn build_cli_prompt(doc: &Document, messages: &[ChatMessage]) -> String {
+    let doc_json = serde_json::to_string_pretty(doc).unwrap_or_default();
+    let transcript = messages
+        .iter()
+        .filter_map(message_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Tu es l'assistant d'édition de Plume, un éditeur de documents. Tu modifies le document \
+UNIQUEMENT en émettant des opérations. Cible les blocs existants par leur `id` ; pour InsertBlock, \
+génère un id unique nouveau.\n\n\
+Tu DOIS répondre par UN SEUL objet JSON, sans aucun texte ni balise autour, de la forme :\n\
+{{\"message\": \"<brève réponse en français>\", \"ops\": [<op>, ...]}}  (\"ops\" peut être vide).\n\n\
+{OPS_HELP}\n\n\
+Document actuel (JSON) :\n{doc_json}\n\n\
+Conversation :\n{transcript}\n\n\
+Réponds maintenant par l'objet JSON {{\"message\":..., \"ops\":[...]}} et RIEN d'autre."
+    )
+}
+
+/// Extrait le premier objet JSON équilibré d'une chaîne (tolère prose/fences autour).
+fn extract_json_object(s: &str) -> Option<&str> {
+    let start = s.find('{')?;
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut esc = false;
+    for (i, c) in s[start..].char_indices() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if c == '\\' {
+                esc = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+        } else {
+            match c {
+                '"' => in_str = true,
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(&s[start..start + i + c.len_utf8()]);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Provider CLI : un appel à `claude`, puis application des ops du JSON renvoyé.
+async fn run_cli_agent(
+    app: AppHandle,
+    state: &Shared,
+    mut messages: Vec<ChatMessage>,
+) -> Vec<ChatMessage> {
+    let claude = match find_claude() {
+        Some(p) => p,
+        None => {
+            emit_error(
+                &app,
+                "Claude Code (`claude`) introuvable. Installe-le, ou choisis « clé API ».",
+            );
+            return messages;
+        }
+    };
+
+    let doc = {
+        let s = state.lock().unwrap_or_else(|e| e.into_inner());
+        s.doc.clone()
+    };
+    let prompt = build_cli_prompt(&doc, &messages);
+
+    // `claude -p` lit le prompt sur stdin (évite les limites de longueur d'arg).
+    let mut cmd = claude_command(&claude);
+    cmd.arg("-p")
+        .arg("--output-format")
+        .arg("text")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            emit_error(&app, format!("échec du lancement de claude : {e}"));
+            return messages;
+        }
+    };
+
+    // Écrire stdin dans une tâche dédiée pendant que `wait_with_output` draine
+    // stdout/stderr en parallèle — sinon un gros document peut saturer le pipe et
+    // provoquer un inter-blocage.
+    if let Some(mut stdin) = child.stdin.take() {
+        tokio::spawn(async move {
+            let _ = stdin.write_all(prompt.as_bytes()).await;
+            let _ = stdin.shutdown().await; // EOF
+        });
+    }
+
+    let out = match child.wait_with_output().await {
+        Ok(o) => o,
+        Err(e) => {
+            emit_error(&app, format!("claude a échoué : {e}"));
+            return messages;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let detail = if !stderr.trim().is_empty() {
+            stderr.trim().to_string()
+        } else {
+            stdout.chars().take(400).collect::<String>()
+        };
+        emit_error(
+            &app,
+            format!(
+                "claude a renvoyé une erreur (code {:?}) : {detail}",
+                out.status.code()
+            ),
+        );
+        return messages;
+    }
+
+    let parsed: Value =
+        match extract_json_object(&stdout).and_then(|j| serde_json::from_str(j).ok()) {
+            Some(v) => v,
+            None => {
+                emit_error(&app, "réponse de claude illisible (JSON attendu).");
+                return messages;
+            }
+        };
+
+    // Application best-effort : les ops valides sont appliquées, les invalides
+    // signalées (pas de boucle d'auto-correction sur ce chemin one-shot).
+    let mut applied = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    if let Some(ops) = parsed["ops"].as_array() {
+        for op_val in ops {
+            match serde_json::from_value::<Op>(op_val.clone()) {
+                Ok(op) => match apply_validated_op(&app, state, op, "cli") {
+                    Ok(()) => applied += 1,
+                    Err(reason) => errors.push(reason),
+                },
+                Err(e) => errors.push(format!("op illisible : {e}")),
+            }
+        }
+    }
+    if !errors.is_empty() {
+        emit_error(
+            &app,
+            format!(
+                "{applied} op(s) appliquée(s), {} refusée(s) : {}",
+                errors.len(),
+                errors.join(" ; ")
+            ),
+        );
+    }
+
+    // Message affiché : celui de Claude, sinon un libellé si des ops ont été
+    // appliquées, sinon rien (pas de bulle vide persistée dans l'historique).
+    let model_msg = parsed["message"].as_str().unwrap_or("").trim().to_string();
+    let final_text = if !model_msg.is_empty() {
+        model_msg
+    } else if applied > 0 {
+        "Modifications appliquées.".to_string()
+    } else {
+        String::new()
+    };
+    if !final_text.is_empty() {
+        let _ = app.emit("assistant_text", json!({ "text": final_text }));
+    }
+    let _ = app.emit("assistant_done", json!({}));
+    if !final_text.is_empty() {
+        messages.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: json!([{ "type": "text", "text": final_text }]),
+        });
+    }
+    messages
+}
+
+/// Command : envoie l'historique au provider choisi (`api` = API Anthropic via
+/// clé ; `cli` = Claude Code local) et renvoie l'historique mis à jour.
 #[tauri::command]
 pub async fn chat_send(
     messages: Vec<ChatMessage>,
+    provider: String,
     app: AppHandle,
     state: tauri::State<'_, Shared>,
 ) -> Result<Vec<ChatMessage>, String> {
+    if provider == "cli" {
+        return Ok(run_cli_agent(app, state.inner(), messages).await);
+    }
+    // Défaut : API Anthropic (clé).
     let api_key = match std::env::var("ANTHROPIC_API_KEY") {
         Ok(k) => k,
         Err(_) => {
             let msg =
-                "ANTHROPIC_API_KEY manquante : définis-la dans l'environnement avant de lancer l'app."
-                    .to_string();
+                "ANTHROPIC_API_KEY manquante : définis-la, ou choisis « Claude Code ».".to_string();
             emit_error(&app, msg.clone());
             return Err(msg);
         }
@@ -620,5 +955,29 @@ mod tests {
         assert!(tool_use_to_op("SetRuns", &json!({ "wrong": "field" })).is_err());
         // Sentinelle d'entrée tronquée → erreur même pour SetMeta (sinon no-op masqué).
         assert!(tool_use_to_op("SetMeta", &json!({ "__parse_error__": true })).is_err());
+    }
+
+    #[test]
+    fn extrait_json_entoure_de_prose_et_de_fences() {
+        let s = "Bien sûr !\n```json\n{\"message\":\"ok\",\"ops\":[]}\n```\nVoilà.";
+        let j = extract_json_object(s).expect("doit trouver un objet JSON");
+        let v: Value = serde_json::from_str(j).unwrap();
+        assert_eq!(v["message"], "ok");
+        assert!(v["ops"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn extrait_json_ignore_les_accolades_dans_les_strings() {
+        let s = r#"{"message":"a {b} c","ops":[{"op":"SetMeta","title":null}]}"#;
+        let j = extract_json_object(s).expect("doit trouver");
+        assert_eq!(j, s, "l'objet entier malgré une accolade dans une chaîne");
+    }
+
+    #[test]
+    fn prompt_cli_contient_doc_et_consignes() {
+        let prompt = build_cli_prompt(&plume_core::Document::empty(), &[]);
+        assert!(prompt.contains("\"ops\""));
+        assert!(prompt.contains("Document actuel"));
+        assert!(prompt.contains("SetRuns"));
     }
 }

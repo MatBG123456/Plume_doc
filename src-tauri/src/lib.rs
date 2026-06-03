@@ -162,6 +162,7 @@ pub fn run() {
             undo,
             redo,
             chat::chat_send,
+            chat::detect_chat_providers,
             persist::save_document,
             persist::open_document,
             export::export_markdown,
