@@ -1,6 +1,8 @@
 import type { ElementType, ReactNode } from "react";
 import type { Block, Run } from "../bindings";
 import { RunsView } from "./RunsView";
+import { useEditor } from "../editor/EditorContext";
+import { EditableText } from "../editor/EditableText";
 
 // Dans le modèle, les listes n'existent pas comme conteneur : chaque puce est un
 // bloc `ListItem` plat porteur de `ordered` + `level` (0..=5). Le renderer doit
@@ -12,9 +14,18 @@ import { RunsView } from "./RunsView";
 // intermédiaires, et un segment démarrant à `level > 0` est indenté d'autant —
 // l'information de `level` n'est donc jamais perdue.
 
-type Item = { id: string; ordered: boolean; level: number; runs: Run[] };
+type Item = { block: Block; ordered: boolean; level: number; runs: Run[] };
 
 type Entry = { ordered: boolean; key: string; node: ReactNode };
+
+/** Contenu d'un item : éditable (span) si l'éditeur est actif, sinon lecture seule. */
+function itemContent(item: Item, editable: boolean): ReactNode {
+  return editable ? (
+    <EditableText block={item.block} runs={item.runs} tag="span" className="block" />
+  ) : (
+    <RunsView runs={item.runs} />
+  );
+}
 
 /**
  * Rend tous les items de `items[start..]` dont le `level >= depth`, en ouvrant
@@ -25,6 +36,7 @@ function renderLevel(
   start: number,
   depth: number,
   keyBase: string,
+  editable: boolean,
 ): [ReactNode, number] {
   const entries: Entry[] = [];
   let i = start;
@@ -35,14 +47,14 @@ function renderLevel(
       i += 1;
       let nested: ReactNode = null;
       if (i < items.length && items[i].level > depth) {
-        [nested, i] = renderLevel(items, i, depth + 1, it.id);
+        [nested, i] = renderLevel(items, i, depth + 1, it.block.id, editable);
       }
       entries.push({
         ordered: it.ordered,
-        key: it.id,
+        key: it.block.id,
         node: (
-          <li key={it.id} data-block-id={it.id} className="pl-1 leading-relaxed">
-            <RunsView runs={it.runs} />
+          <li key={it.block.id} data-block-id={it.block.id} className="pl-1 leading-relaxed">
+            {itemContent(it, editable)}
             {nested}
           </li>
         ),
@@ -53,7 +65,7 @@ function renderLevel(
       const phantomKey = `${keyBase}-ph${i}`;
       const ordered = items[i].ordered;
       let nested: ReactNode;
-      [nested, i] = renderLevel(items, i, depth + 1, phantomKey);
+      [nested, i] = renderLevel(items, i, depth + 1, phantomKey, editable);
       entries.push({
         ordered,
         key: phantomKey,
@@ -93,10 +105,11 @@ function renderLevel(
 
 /** Reçoit une suite de blocs `ListItem` consécutifs et la rend imbriquée. */
 export function ListGroup({ blocks }: { blocks: Block[] }): ReactNode {
+  const editable = useEditor()?.editable ?? false;
   const items: Item[] = blocks.map((b) => {
     // `b.node` est garanti `ListItem` par le regroupement amont.
     const node = b.node as Extract<Block["node"], { type: "ListItem" }>;
-    return { id: b.id, ordered: node.ordered, level: node.level, runs: node.runs };
+    return { block: b, ordered: node.ordered, level: node.level, runs: node.runs };
   });
-  return renderLevel(items, 0, 0, "list")[0];
+  return renderLevel(items, 0, 0, "list", editable)[0];
 }

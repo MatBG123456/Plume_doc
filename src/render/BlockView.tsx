@@ -2,6 +2,8 @@ import type { ElementType, ReactNode } from "react";
 import type { Block } from "../bindings";
 import { RunsView } from "./RunsView";
 import { ListGroup } from "./ListGroup";
+import { useEditor } from "../editor/EditorContext";
+import { EditableText } from "../editor/EditableText";
 
 // Dispatch d'un bloc vers son composant du design system. Le rendu des listes
 // (regroupement des `ListItem` consécutifs) appartient à `DocumentView` ; ici on
@@ -31,10 +33,13 @@ const HEADING_TAG: Record<number, ElementType> = {
 export function BlockView({ block }: { block: Block }): ReactNode {
   const { node } = block;
   const anchor = block.id;
+  const editable = useEditor()?.editable ?? false;
 
   switch (node.type) {
     case "Paragraph":
-      return (
+      return editable ? (
+        <EditableText block={block} runs={node.runs} tag="p" className="my-3 leading-relaxed" />
+      ) : (
         <p data-block-id={anchor} className="my-3 leading-relaxed">
           <RunsView runs={node.runs} />
         </p>
@@ -43,7 +48,14 @@ export function BlockView({ block }: { block: Block }): ReactNode {
     case "Heading": {
       const level = Math.min(6, Math.max(1, node.level));
       const Tag = HEADING_TAG[level];
-      return (
+      return editable ? (
+        <EditableText
+          block={block}
+          runs={node.runs}
+          tag={`h${level}`}
+          className={HEADING[level]}
+        />
+      ) : (
         <Tag data-block-id={anchor} className={HEADING[level]}>
           <RunsView runs={node.runs} />
         </Tag>
@@ -56,7 +68,14 @@ export function BlockView({ block }: { block: Block }): ReactNode {
       return <ListGroup blocks={[block]} />;
 
     case "Quote":
-      return (
+      return editable ? (
+        <EditableText
+          block={block}
+          runs={node.runs}
+          tag="blockquote"
+          className="my-4 border-l-4 border-neutral-300 pl-4 italic text-neutral-600"
+        />
+      ) : (
         <blockquote
           data-block-id={anchor}
           className="my-4 border-l-4 border-neutral-300 pl-4 italic text-neutral-600"

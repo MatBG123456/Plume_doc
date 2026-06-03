@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { DocumentView } from "./render/DocumentView";
-import { fixtureDoc } from "./render/fixture";
+import { Editor } from "./editor/Editor";
 
-// Wave 3 — renderer. L'écran affiche un document fixture (toutes les variantes
-// de blocs et de marques) via le pipeline de rendu `DocumentView`. Une barre
-// supérieure discrète conserve le smoke-test `ping` du cœur Rust (Wave 0) : vert
-// = chaîne webview → Tauri → plume-core OK ; gris = aperçu hors Tauri (Vite seul).
+// Wave 4 — édition directe. L'app monte l'`Editor` : le document vit côté Rust
+// (source de vérité) et chaque frappe, raccourci ou action de la barre d'outils
+// passe par le pipeline d'opérations (`apply_op`). La barre supérieure conserve
+// le smoke-test `ping` du cœur (Wave 0).
 
 type Core = "checking" | "ok" | "offline";
 
@@ -33,13 +32,13 @@ function CoreStatus() {
 function App() {
   return (
     <div className="min-h-screen bg-neutral-100">
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-neutral-200 bg-white/80 px-6 py-3 backdrop-blur">
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200 bg-white/80 px-6 py-3 backdrop-blur">
         <span className="text-sm font-semibold tracking-tight">Plume</span>
         <CoreStatus />
       </header>
 
       <main className="pb-16">
-        <DocumentView doc={fixtureDoc} />
+        <Editor />
       </main>
     </div>
   );

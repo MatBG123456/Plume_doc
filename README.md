@@ -84,18 +84,26 @@ Plume_doc/
 │
 ├── src/                       # Front React + Vite + TS + Tailwind
 │   ├── main.tsx
-│   ├── App.tsx                # affiche la fixture (W3) + smoke-test ping (W0)
+│   ├── App.tsx                # monte l'éditeur (W4) + smoke-test ping (W0)
 │   ├── bindings/             # types TS générés par ts-rs (NE PAS éditer)
-│   ├── render/               # Wave 3 : renderer lecture seule (blocks → DS)
+│   ├── render/               # Wave 3 : renderer (blocks → DS) ; éditable en W4
 │   │   ├── DocumentView.tsx  #   page « feuille » + segmentation listes/blocs
 │   │   ├── BlockView.tsx     #   un composant par variante de Node
 │   │   ├── ListGroup.tsx     #   ListItem plats → <ul>/<ol> imbriqués (level absolu)
-│   │   ├── RunsView.tsx      #   Run[] → spans (marks, liens, couleur)
-│   │   └── fixture.ts        #   document de démo couvrant tout le modèle
+│   │   ├── RunsView.tsx      #   Run[] → spans (lecture seule)
+│   │   ├── marks.ts          #   mapping Marks → styles (partagé rendu/édition)
+│   │   └── fixture.ts        #   document de démo (fallback hors Tauri)
+│   ├── editor/               # Wave 4 : édition directe (frappe → ops)
+│   │   ├── Editor.tsx        #   charge le doc Rust, file de dispatch, contexte
+│   │   ├── EditableText.tsx  #   hôte contentEditable → SetRuns/InsertBlock/…
+│   │   ├── Toolbar.tsx       #   type de bloc, marques, lien, couleurs
+│   │   ├── actions.ts        #   ApplyMark / SetNode sur la sélection
+│   │   ├── text.ts           #   réconciliation texte ⇄ runs (pure, testée)
+│   │   └── caret.ts          #   sélection DOM ⇄ offsets code points
 │   └── styles.css
 │
 ├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
-│   ├── src/lib.rs             # command `ping` → délègue à plume-core
+│   ├── src/lib.rs             # commands : ping, get_document, apply_op, undo, redo
 │   ├── src/main.rs
 │   ├── tauri.conf.json
 │   ├── capabilities/default.json
@@ -218,7 +226,7 @@ Implémentée dans la command Tauri `chat_send` :
 
 ## Démarrage
 
-Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, l'écran affiche un document *fixture* rendu fidèlement (lecture seule) via `src/render/` ; l'édition directe au clavier arrive en Wave 4.
+Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
 
 ### Prérequis
 
@@ -258,7 +266,7 @@ npm run build                       # tsc + build Vite de production
 | ✅ **W1** | Modèle + `serde` + doc vide + `ts-rs` | round-trip JSON ⇄ struct ; types TS générés |
 | ✅ **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
 | ✅ **W3** | Renderer React : blocks → composants DS (`src/render/`), lecture seule | la fixture (toutes variantes de blocs + marques) s'affiche fidèlement |
-| **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; toolbar | éditer au clavier passe par le pipeline d'ops |
+| ✅ **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; Backspace → fusion ; toolbar (type de bloc, marques, lien, couleur) | toute édition clavier/souris passe par le pipeline d'ops Rust (`apply_op`) |
 | **W5** | Boucle agent + 8 outils = 8 ops + panneau chat streaming | « mets le titre en gras et ajoute un paragraphe d'intro » fonctionne via Claude |
 | **W6** | Persistance `.plume.json` (open / save / autosave) | fermer/rouvrir conserve tout |
 | **W7** | Export Markdown + `.docx` + PDF | les 3 exports ouvrent sans corruption |
