@@ -67,7 +67,7 @@ export function Toolbar() {
   if (!editor) return null;
 
   return (
-    <div className="sticky top-[49px] z-10 flex flex-wrap items-center gap-0.5 border-b border-neutral-200 bg-white/90 px-4 py-1.5 backdrop-blur">
+    <div className="flex flex-wrap items-center gap-0.5 border-b border-neutral-200 px-4 py-1.5">
       {BLOCK_KINDS.map((b) => (
         <Tool key={b.kind} title={b.title} onAction={() => setBlockType(editor, b.kind)}>
           {b.label}

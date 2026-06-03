@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use plume_core::{apply, Block, Document, Meta, Node, Op, Run};
 
 mod chat;
+mod persist;
 
 /// État d'édition partagé entre toutes les commands.
 ///
@@ -45,7 +46,7 @@ fn ping() -> String {
 /// Renvoie le document courant (chargé au démarrage du front).
 #[tauri::command]
 fn get_document(state: tauri::State<'_, Shared>) -> Result<Document, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
+    let s = state.lock().unwrap_or_else(|e| e.into_inner());
     Ok(s.doc.clone())
 }
 
@@ -56,7 +57,7 @@ fn get_document(state: tauri::State<'_, Shared>) -> Result<Document, String> {
 /// modifier l'état (l'UI, comme Claude, peut alors se corriger).
 #[tauri::command]
 fn apply_op(op: Op, state: tauri::State<'_, Shared>) -> Result<Document, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
     let inverse = apply(&mut s.doc, op).map_err(|e| e.reason)?;
     s.undo.push(inverse);
     s.redo.clear();
@@ -69,7 +70,7 @@ fn apply_op(op: Op, state: tauri::State<'_, Shared>) -> Result<Document, String>
 /// le document intacts (pas de désynchronisation silencieuse de l'historique).
 #[tauri::command]
 fn undo(state: tauri::State<'_, Shared>) -> Result<Document, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(op) = s.undo.last().cloned() {
         let redo_op = apply(&mut s.doc, op).map_err(|e| e.reason)?;
         s.undo.pop();
@@ -81,7 +82,7 @@ fn undo(state: tauri::State<'_, Shared>) -> Result<Document, String> {
 /// Rétablit la dernière opération annulée et renvoie le document.
 #[tauri::command]
 fn redo(state: tauri::State<'_, Shared>) -> Result<Document, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(op) = s.redo.last().cloned() {
         let undo_op = apply(&mut s.doc, op).map_err(|e| e.reason)?;
         s.redo.pop();
@@ -119,6 +120,7 @@ fn starter_document() -> Document {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Shared::new(EditorState::new()))
         .invoke_handler(tauri::generate_handler![
             ping,
@@ -126,7 +128,9 @@ pub fn run() {
             apply_op,
             undo,
             redo,
-            chat::chat_send
+            chat::chat_send,
+            persist::save_document,
+            persist::open_document
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application Plume");
