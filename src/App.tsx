@@ -1,5 +1,10 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { Document } from "./bindings";
+
+// Document vide, typé par le modèle Rust généré (ts-rs). Prouve que le front
+// consomme bien la source de vérité de `plume-core`.
+const EMPTY_DOC: Document = { meta: { title: "", lang: "fr" }, blocks: [] };
 
 /**
  * Wave 0 — écran de vérification end-to-end.
@@ -25,8 +30,13 @@ function App() {
     <main className="min-h-screen flex flex-col items-center justify-center gap-6 p-8 text-center">
       <h1 className="text-3xl font-semibold tracking-tight">Plume</h1>
       <p className="text-sm text-neutral-500 max-w-md">
-        Éditeur de documents riches AI-native. Wave 0 : vérification de
-        l'aller-retour webview → Tauri → cœur Rust.
+        Éditeur de documents riches AI-native. Wave 1 : modèle de document typé,
+        partagé entre Rust (source de vérité) et TypeScript (ts-rs).
+      </p>
+
+      <p className="text-xs text-neutral-400">
+        Document courant : « {EMPTY_DOC.meta.title || "sans titre" } » —{" "}
+        {EMPTY_DOC.blocks.length} bloc(s)
       </p>
 
       <button

@@ -84,7 +84,8 @@ Plume_doc/
 │
 ├── src/                       # Front React + Vite + TS + Tailwind
 │   ├── main.tsx
-│   ├── App.tsx                # Wave 0 : écran de vérification du ping
+│   ├── App.tsx                # écran de vérification (ping + modèle)
+│   ├── bindings/             # types TS générés par ts-rs (NE PAS éditer)
 │   └── styles.css
 │
 ├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
@@ -95,7 +96,9 @@ Plume_doc/
 │   └── icons/
 │
 └── crates/plume-core/         # Cœur : modèle, ops, validate, apply, inverse, export
-    └── src/lib.rs             # Wave 0 : fn ping() + test
+    └── src/
+        ├── lib.rs             # fn ping() + ré-exports
+        └── model.rs           # Wave 1 : modèle de document (serde + ts-rs)
 ```
 
 > Si les 3 apps de la suite passent en monorepo, factoriser le pattern `Op / validate / apply / inverse` dans un crate partagé `atelier-core`.
@@ -124,6 +127,23 @@ struct Marks{ bold: bool, italic: bool, underline: bool, strike: bool,
               code: bool, link: Option<String>, color: Option<String> /* #RRGGBB */ }
 struct Cell { runs: Vec<Run> }
 ```
+
+> **Implémenté en Wave 1** dans `crates/plume-core/src/model.rs`. Les énumérations
+> sont *internally tagged* (`{"type":"Paragraph","runs":[…]}`) pour rester
+> lisibles par un LLM. `Document::empty()` produit un document vide.
+
+### Types partagés Rust ⇄ TypeScript (ts-rs)
+
+Le modèle Rust est l'unique source de vérité. Les types TypeScript sont
+**générés** par [`ts-rs`](https://github.com/Aleph-Alpha/ts-rs) dans
+`src/bindings/` — ne les éditez jamais à la main. Pour les régénérer après une
+modification du modèle :
+
+```bash
+cargo test -p plume-core   # les tests `export_bindings_*` réécrivent src/bindings/
+```
+
+Le front les consomme via `import type { Document } from "./bindings"`.
 
 ## Opérations & validation
 
@@ -219,7 +239,7 @@ npm run build                       # tsc + build Vite de production
 | Wave | Livrable | Critère d'acceptation |
 |---|---|---|
 | ✅ **W0** | Scaffold Tauri 2 + Vite/React/TS/Tailwind ; crate `plume-core` ; command `ping` | `npm run tauri dev` ouvre une fenêtre ; `ping` répond depuis Rust |
-| **W1** | Modèle + `serde` + doc vide + `ts-rs` | round-trip JSON ⇄ struct ; types TS générés |
+| ✅ **W1** | Modèle + `serde` + doc vide + `ts-rs` | round-trip JSON ⇄ struct ; types TS générés |
 | **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
 | **W3** | Renderer React : blocks → composants DS, curseur, sélection | un doc fixture s'affiche fidèlement |
 | **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; toolbar | éditer au clavier passe par le pipeline d'ops |
