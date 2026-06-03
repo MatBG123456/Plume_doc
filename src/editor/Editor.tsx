@@ -162,6 +162,44 @@ export function Editor() {
     }
   }, []);
 
+  // Nom de base pour les exports (dérivé du fichier courant, sans extension).
+  const baseName = useCallback(() => {
+    const n = pathRef.current ? pathRef.current.split(/[\\/]/).pop() ?? "document" : "document";
+    return n.replace(/\.plume\.json$/i, "").replace(/\.json$/i, "");
+  }, []);
+
+  const exportMarkdown = useCallback(async () => {
+    try {
+      const selected = await saveDialog({
+        defaultPath: `${baseName()}.md`,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (typeof selected !== "string") return;
+      await invoke("export_markdown", { path: selected, doc: docRef.current ?? fixtureDoc });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [baseName]);
+
+  const exportDocx = useCallback(async () => {
+    try {
+      const selected = await saveDialog({
+        defaultPath: `${baseName()}.docx`,
+        filters: [{ name: "Word", extensions: ["docx"] }],
+      });
+      if (typeof selected !== "string") return;
+      await invoke("export_docx", { path: selected, doc: docRef.current ?? fixtureDoc });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [baseName]);
+
+  // PDF : on imprime le webview (le renderer sert de mise en page) ; le CSS
+  // `print:` masque tout le chrome et n'imprime que la page du document.
+  function exportPdf() {
+    window.print();
+  }
+
   // Autosave débouncé : ~800 ms après la dernière modification, si un chemin est
   // connu. Le `doc` courant (snapshot) est passé à `saveTo`.
   useEffect(() => {
@@ -258,11 +296,15 @@ export function Editor() {
       <div className="flex items-start">
         <div className="min-w-0 flex-1">
           {editable && (
-            <div className="sticky top-[49px] z-10 bg-white/95 backdrop-blur">
+            <div className="sticky top-[49px] z-10 bg-white/95 backdrop-blur print:hidden">
               <div className="flex items-center gap-1 border-b border-neutral-200 px-4 py-1.5">
                 <FileButton onClick={() => void openFile()}>Ouvrir</FileButton>
                 <FileButton onClick={saveCurrent}>Enregistrer</FileButton>
                 <FileButton onClick={() => void saveAsFile()}>Enregistrer sous…</FileButton>
+                <span className="mx-1 h-5 w-px bg-neutral-200" />
+                <FileButton onClick={() => void exportMarkdown()}>↧ Markdown</FileButton>
+                <FileButton onClick={() => void exportDocx()}>↧ Word</FileButton>
+                <FileButton onClick={exportPdf}>↧ PDF</FileButton>
                 <span className="ml-auto flex items-center gap-1.5 text-xs text-neutral-500">
                   <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
                   <span className="font-medium text-neutral-700">{fileName}</span>
@@ -275,13 +317,13 @@ export function Editor() {
           <DocumentView doc={doc} />
         </div>
         {editable && (
-          <aside className="sticky top-[49px] h-[calc(100vh-49px)] w-[340px] shrink-0 border-l border-neutral-200 bg-neutral-50">
+          <aside className="sticky top-[49px] h-[calc(100vh-49px)] w-[340px] shrink-0 border-l border-neutral-200 bg-neutral-50 print:hidden">
             <ChatPanel />
           </aside>
         )}
       </div>
       {error && (
-        <div className="fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md bg-red-600 px-4 py-2 text-sm text-white shadow-lg">
+        <div className="fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md bg-red-600 px-4 py-2 text-sm text-white shadow-lg print:hidden">
           {error}
         </div>
       )}

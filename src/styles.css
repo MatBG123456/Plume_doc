@@ -6,3 +6,10 @@
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light dark;
 }
+
+/* Export PDF (impression du webview) : marge de page raisonnable. */
+@media print {
+  @page {
+    margin: 1.5cm;
+  }
+}

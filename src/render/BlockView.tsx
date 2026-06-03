@@ -92,8 +92,10 @@ export function BlockView({ block }: { block: Block }): ReactNode {
               {node.lang}
             </figcaption>
           )}
-          <pre className="overflow-x-auto rounded-lg bg-neutral-900 p-4 text-sm text-neutral-100">
-            <code className="whitespace-pre font-mono">{node.text}</code>
+          <pre className="overflow-x-auto rounded-lg bg-neutral-900 p-4 text-sm text-neutral-100 print:bg-neutral-100 print:text-neutral-900 print:ring-1 print:ring-neutral-300">
+            <code className="whitespace-pre font-mono print:whitespace-pre-wrap print:break-words">
+              {node.text}
+            </code>
           </pre>
         </figure>
       );
@@ -143,13 +145,14 @@ export function BlockView({ block }: { block: Block }): ReactNode {
           data-block-id={anchor}
           role="separator"
           aria-label="Saut de page"
-          className="my-8 select-none"
+          className="my-8 select-none break-after-page print:my-0"
         >
           {/* Habillage purement visuel : masqué aux lecteurs d'écran (l'info est
-              déjà portée par aria-label du séparateur). */}
+              déjà portée par aria-label) et à l'impression (le saut de page réel
+              est porté par `break-after-page` sur le conteneur). */}
           <div
             aria-hidden="true"
-            className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-neutral-400"
+            className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-neutral-400 print:hidden"
           >
             <span className="h-px flex-1 bg-neutral-200" />
             saut de page

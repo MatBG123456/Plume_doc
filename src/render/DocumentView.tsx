@@ -30,7 +30,7 @@ export function DocumentView({ doc }: { doc: Document }): ReactNode {
   return (
     <article
       lang={doc.meta.lang}
-      className="mx-auto my-10 max-w-[760px] rounded-sm bg-white px-14 py-16 font-serif text-[17px] leading-relaxed text-neutral-800 shadow-sm ring-1 ring-neutral-200"
+      className="mx-auto my-10 max-w-[760px] rounded-sm bg-white px-14 py-16 font-serif text-[17px] leading-relaxed text-neutral-800 shadow-sm ring-1 ring-neutral-200 print:my-0 print:max-w-none print:rounded-none print:px-0 print:py-0 print:shadow-none print:ring-0"
     >
       {doc.meta.title !== "" && (
         <header className="mb-10 border-b border-neutral-200 pb-6">

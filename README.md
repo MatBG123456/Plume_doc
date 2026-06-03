@@ -104,9 +104,10 @@ Plume_doc/
 │   └── styles.css
 │
 ├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
-│   ├── src/lib.rs             # commands : ping, get_document, apply_op, undo, redo, save/open
+│   ├── src/lib.rs             # commands : ping, get_document, apply_op, undo, redo, save/open, export
 │   ├── src/chat.rs            # Wave 5 : boucle agent (Anthropic streaming + 8 outils)
 │   ├── src/persist.rs         # Wave 6 : open/save .plume.json (écriture atomique)
+│   ├── src/export.rs          # Wave 7 : export Markdown + .docx (docx-rs)
 │   ├── src/main.rs
 │   ├── tauri.conf.json
 │   ├── capabilities/default.json
@@ -229,7 +230,7 @@ Implémentée dans la command Tauri `chat_send` :
 
 ## Démarrage
 
-Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Depuis la **Wave 5**, un panneau de chat (`chat_send`) pilote l'édition via Claude : l'API Anthropic est appelée **côté Rust** en streaming, chaque `tool_use` (8 outils = 8 ops) est validé puis appliqué par le **même** pipeline, avec preview live. Le chat requiert `ANTHROPIC_API_KEY` (cf. ci-dessous). Depuis la **Wave 6**, on ouvre/enregistre des `.plume.json` (sélecteur natif, écriture atomique côté Rust) avec **autosave** débouncé et flush à la fermeture (Ctrl/Cmd+S / +O). Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
+Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Depuis la **Wave 5**, un panneau de chat (`chat_send`) pilote l'édition via Claude : l'API Anthropic est appelée **côté Rust** en streaming, chaque `tool_use` (8 outils = 8 ops) est validé puis appliqué par le **même** pipeline, avec preview live. Le chat requiert `ANTHROPIC_API_KEY` (cf. ci-dessous). Depuis la **Wave 6**, on ouvre/enregistre des `.plume.json` (sélecteur natif, écriture atomique côté Rust) avec **autosave** débouncé et flush à la fermeture (Ctrl/Cmd+S / +O). Depuis la **Wave 7**, on exporte en **Markdown** et **`.docx`** (mapping Rust) et en **PDF** (impression du webview, qui réutilise le renderer). Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
 
 ### Prérequis
 
@@ -272,7 +273,7 @@ npm run build                       # tsc + build Vite de production
 | ✅ **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; Backspace → fusion ; toolbar (type de bloc, marques, lien, couleur) | toute édition clavier/souris passe par le pipeline d'ops Rust (`apply_op`) |
 | ✅ **W5** | Boucle agent (`chat_send`, API Anthropic streaming, côté Rust) + 8 outils = 8 ops + panneau chat | « mets le titre en gras et ajoute un paragraphe d'intro » via Claude ; chaque `tool_use` validé+appliqué par le pipeline |
 | ✅ **W6** | Persistance `.plume.json` : open / save / **autosave** (I/O Rust atomique, sélecteur natif, flush à la fermeture) | fermer/rouvrir conserve tout |
-| **W7** | Export Markdown + `.docx` + PDF | les 3 exports ouvrent sans corruption |
+| ✅ **W7** | Export **Markdown** + **`.docx`** (mapping Rust) + **PDF** (impression du webview, CSS `print:`) | les 3 exports ouvrent sans corruption |
 | **W8** | Polish : undo/redo UI (Cmd+Z), palette de commandes, recherche, raccourcis | undo multi-niveaux fiable |
 
 ## Conventions de développement

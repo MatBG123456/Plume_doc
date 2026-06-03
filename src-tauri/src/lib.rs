@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use plume_core::{apply, Block, Document, Meta, Node, Op, Run};
 
 mod chat;
+mod export;
 mod persist;
 
 /// État d'édition partagé entre toutes les commands.
@@ -130,7 +131,9 @@ pub fn run() {
             redo,
             chat::chat_send,
             persist::save_document,
-            persist::open_document
+            persist::open_document,
+            export::export_markdown,
+            export::export_docx
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application Plume");

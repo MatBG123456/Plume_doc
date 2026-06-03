@@ -31,8 +31,8 @@ function CoreStatus() {
 
 function App() {
   return (
-    <div className="min-h-screen bg-neutral-100">
-      <header className="sticky top-0 z-20 flex h-[49px] items-center justify-between border-b border-neutral-200 bg-white/80 px-6 backdrop-blur">
+    <div className="min-h-screen bg-neutral-100 print:bg-white">
+      <header className="sticky top-0 z-20 flex h-[49px] items-center justify-between border-b border-neutral-200 bg-white/80 px-6 backdrop-blur print:hidden">
         <span className="text-sm font-semibold tracking-tight">Plume</span>
         <CoreStatus />
       </header>
