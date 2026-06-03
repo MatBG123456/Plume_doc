@@ -288,5 +288,6 @@ npm run build                       # tsc + build Vite de production
 ## Documentation complémentaire
 
 - [`BOOTSTRAP-plume-docs.md`](./BOOTSTRAP-plume-docs.md) — spécification complète, détails du modèle, plan de build wave par wave et première action.
+- [`GUIDE-integration-claude-cli.md`](./GUIDE-integration-claude-cli.md) — guide réutilisable : brancher le CLI `claude` (Claude Code) comme backend IA d'une app « bring‑your‑own‑auth », pour d'autres apps de même nature.
 - [Documentation API Anthropic](https://docs.claude.com/en/api/overview)
 - [Documentation Tauri 2](https://v2.tauri.app/)
