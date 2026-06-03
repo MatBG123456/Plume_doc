@@ -93,17 +93,19 @@ Plume_doc/
 │   │   ├── RunsView.tsx      #   Run[] → spans (lecture seule)
 │   │   ├── marks.ts          #   mapping Marks → styles (partagé rendu/édition)
 │   │   └── fixture.ts        #   document de démo (fallback hors Tauri)
-│   ├── editor/               # Wave 4 : édition directe (frappe → ops)
-│   │   ├── Editor.tsx        #   charge le doc Rust, file de dispatch, contexte
+│   ├── editor/               # Wave 4 : édition directe ; Wave 5 : chat
+│   │   ├── Editor.tsx        #   charge le doc Rust, file de dispatch, contexte, preview live
 │   │   ├── EditableText.tsx  #   hôte contentEditable → SetRuns/InsertBlock/…
 │   │   ├── Toolbar.tsx       #   type de bloc, marques, lien, couleurs
 │   │   ├── actions.ts        #   ApplyMark / SetNode sur la sélection
 │   │   ├── text.ts           #   réconciliation texte ⇄ runs (pure, testée)
-│   │   └── caret.ts          #   sélection DOM ⇄ offsets code points
+│   │   ├── caret.ts          #   sélection DOM ⇄ offsets code points
+│   │   └── ChatPanel.tsx     #   Wave 5 : panneau chat (streaming → chat_send)
 │   └── styles.css
 │
 ├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
 │   ├── src/lib.rs             # commands : ping, get_document, apply_op, undo, redo
+│   ├── src/chat.rs            # Wave 5 : boucle agent (Anthropic streaming + 8 outils)
 │   ├── src/main.rs
 │   ├── tauri.conf.json
 │   ├── capabilities/default.json
@@ -226,7 +228,7 @@ Implémentée dans la command Tauri `chat_send` :
 
 ## Démarrage
 
-Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
+Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Depuis la **Wave 5**, un panneau de chat (`chat_send`) pilote l'édition via Claude : l'API Anthropic est appelée **côté Rust** en streaming, chaque `tool_use` (8 outils = 8 ops) est validé puis appliqué par le **même** pipeline, avec preview live. Le chat requiert `ANTHROPIC_API_KEY` (cf. ci-dessous). Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
 
 ### Prérequis
 
@@ -267,7 +269,7 @@ npm run build                       # tsc + build Vite de production
 | ✅ **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
 | ✅ **W3** | Renderer React : blocks → composants DS (`src/render/`), lecture seule | la fixture (toutes variantes de blocs + marques) s'affiche fidèlement |
 | ✅ **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; Backspace → fusion ; toolbar (type de bloc, marques, lien, couleur) | toute édition clavier/souris passe par le pipeline d'ops Rust (`apply_op`) |
-| **W5** | Boucle agent + 8 outils = 8 ops + panneau chat streaming | « mets le titre en gras et ajoute un paragraphe d'intro » fonctionne via Claude |
+| ✅ **W5** | Boucle agent (`chat_send`, API Anthropic streaming, côté Rust) + 8 outils = 8 ops + panneau chat | « mets le titre en gras et ajoute un paragraphe d'intro » via Claude ; chaque `tool_use` validé+appliqué par le pipeline |
 | **W6** | Persistance `.plume.json` (open / save / autosave) | fermer/rouvrir conserve tout |
 | **W7** | Export Markdown + `.docx` + PDF | les 3 exports ouvrent sans corruption |
 | **W8** | Polish : undo/redo UI (Cmd+Z), palette de commandes, recherche, raccourcis | undo multi-niveaux fiable |

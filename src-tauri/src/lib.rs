@@ -10,15 +10,18 @@ use std::sync::Mutex;
 
 use plume_core::{apply, Block, Document, Meta, Node, Op, Run};
 
+mod chat;
+
 /// État d'édition partagé entre toutes les commands.
 ///
 /// `undo` / `redo` empilent les opérations **inverses** renvoyées par `apply`
 /// (chaque op a son inverse) ; l'UI d'undo/redo (Cmd+Z) sera câblée en Wave 8,
-/// mais la machinerie vit ici dès maintenant.
-struct EditorState {
-    doc: Document,
-    undo: Vec<Op>,
-    redo: Vec<Op>,
+/// mais la machinerie vit ici dès maintenant. La boucle agent (Wave 5, `chat`)
+/// mute **le même** état via le **même** pipeline.
+pub(crate) struct EditorState {
+    pub(crate) doc: Document,
+    pub(crate) undo: Vec<Op>,
+    pub(crate) redo: Vec<Op>,
 }
 
 impl EditorState {
@@ -31,7 +34,7 @@ impl EditorState {
     }
 }
 
-type Shared = Mutex<EditorState>;
+pub(crate) type Shared = Mutex<EditorState>;
 
 /// Command `ping` (Wave 0) : prouve l'aller-retour webview → Tauri → cœur Rust.
 #[tauri::command]
@@ -122,7 +125,8 @@ pub fn run() {
             get_document,
             apply_op,
             undo,
-            redo
+            redo,
+            chat::chat_send
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application Plume");
