@@ -84,8 +84,14 @@ Plume_doc/
 │
 ├── src/                       # Front React + Vite + TS + Tailwind
 │   ├── main.tsx
-│   ├── App.tsx                # écran de vérification (ping + modèle)
+│   ├── App.tsx                # affiche la fixture (W3) + smoke-test ping (W0)
 │   ├── bindings/             # types TS générés par ts-rs (NE PAS éditer)
+│   ├── render/               # Wave 3 : renderer lecture seule (blocks → DS)
+│   │   ├── DocumentView.tsx  #   page « feuille » + segmentation listes/blocs
+│   │   ├── BlockView.tsx     #   un composant par variante de Node
+│   │   ├── ListGroup.tsx     #   ListItem plats → <ul>/<ol> imbriqués (level absolu)
+│   │   ├── RunsView.tsx      #   Run[] → spans (marks, liens, couleur)
+│   │   └── fixture.ts        #   document de démo couvrant tout le modèle
 │   └── styles.css
 │
 ├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
@@ -212,7 +218,7 @@ Implémentée dans la command Tauri `chat_send` :
 
 ## Démarrage
 
-Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`.
+Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, l'écran affiche un document *fixture* rendu fidèlement (lecture seule) via `src/render/` ; l'édition directe au clavier arrive en Wave 4.
 
 ### Prérequis
 
@@ -251,7 +257,7 @@ npm run build                       # tsc + build Vite de production
 | ✅ **W0** | Scaffold Tauri 2 + Vite/React/TS/Tailwind ; crate `plume-core` ; command `ping` | `npm run tauri dev` ouvre une fenêtre ; `ping` répond depuis Rust |
 | ✅ **W1** | Modèle + `serde` + doc vide + `ts-rs` | round-trip JSON ⇄ struct ; types TS générés |
 | ✅ **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
-| **W3** | Renderer React : blocks → composants DS, curseur, sélection | un doc fixture s'affiche fidèlement |
+| ✅ **W3** | Renderer React : blocks → composants DS (`src/render/`), lecture seule | la fixture (toutes variantes de blocs + marques) s'affiche fidèlement |
 | **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; toolbar | éditer au clavier passe par le pipeline d'ops |
 | **W5** | Boucle agent + 8 outils = 8 ops + panneau chat streaming | « mets le titre en gras et ajoute un paragraphe d'intro » fonctionne via Claude |
 | **W6** | Persistance `.plume.json` (open / save / autosave) | fermer/rouvrir conserve tout |
