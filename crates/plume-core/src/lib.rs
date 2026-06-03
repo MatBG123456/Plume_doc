@@ -3,13 +3,14 @@
 //! À ce stade (Wave 0), le crate n'expose que [`ping`], qui sert à valider
 //! l'aller-retour end-to-end entre le webview, la command Tauri et le Rust.
 //!
-//! Les waves suivantes y ajouteront les opérations (`ops`), la validation, le
-//! reducer `apply` / `inverse` et les exports. Le *reducer* devra rester
+//! Les waves suivantes y ajouteront les exports. Le *reducer* `apply` reste
 //! **pur** (aucune I/O).
 
 pub mod model;
+pub mod ops;
 
 pub use model::{Block, BlockId, Cell, Document, Marks, Meta, Node, Run};
+pub use ops::{apply, validate, MarkPatch, Op, OpError};
 
 /// Réponse au `ping` de Wave 0 : prouve que le cœur Rust est joignable.
 ///

@@ -9,3 +9,5 @@ export type { Node } from "./Node";
 export type { Run } from "./Run";
 export type { Marks } from "./Marks";
 export type { Cell } from "./Cell";
+export type { Op } from "./Op";
+export type { MarkPatch } from "./MarkPatch";

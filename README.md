@@ -98,7 +98,8 @@ Plume_doc/
 └── crates/plume-core/         # Cœur : modèle, ops, validate, apply, inverse, export
     └── src/
         ├── lib.rs             # fn ping() + ré-exports
-        └── model.rs           # Wave 1 : modèle de document (serde + ts-rs)
+        ├── model.rs           # Wave 1 : modèle de document (serde + ts-rs)
+        └── ops.rs             # Wave 2 : Op + validate + apply + inverse (undo)
 ```
 
 > Si les 3 apps de la suite passent en monorepo, factoriser le pattern `Op / validate / apply / inverse` dans un crate partagé `atelier-core`.
@@ -174,6 +175,15 @@ Le ciblage se fait **par `BlockId`**, jamais par offset global fragile. Le `rang
 - `color` = hex `#RRGGBB` valide ; `link` = URL absolue valide.
 - Toute erreur renvoie `{ ok: false, reason: "..." }` à Claude pour auto-correction (sans altérer l'état).
 
+> **Implémenté en Wave 2** dans `crates/plume-core/src/ops.rs` :
+> - `validate(doc, op)` — vérification pure (n'altère rien) ;
+> - `apply(doc, op) -> Result<Op, OpError>` — valide, applique le reducer **pur**,
+>   et **renvoie l'op inverse** prête à empiler pour l'undo. Appliquer l'inverse
+>   restaure exactement l'état précédent (testé pour chaque variante).
+> - `MarkPatch` utilise la *double-option* (`None` = inchangé, `Some(None)` =
+>   effacé) pour distinguer ces deux cas en JSON. `ApplyMark` découpe les runs
+>   sur le range de caractères puis fusionne les runs adjacents de même style.
+
 ## Boucle agent
 
 Implémentée dans la command Tauri `chat_send` :
@@ -240,7 +250,7 @@ npm run build                       # tsc + build Vite de production
 |---|---|---|
 | ✅ **W0** | Scaffold Tauri 2 + Vite/React/TS/Tailwind ; crate `plume-core` ; command `ping` | `npm run tauri dev` ouvre une fenêtre ; `ping` répond depuis Rust |
 | ✅ **W1** | Modèle + `serde` + doc vide + `ts-rs` | round-trip JSON ⇄ struct ; types TS générés |
-| **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
+| ✅ **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
 | **W3** | Renderer React : blocks → composants DS, curseur, sélection | un doc fixture s'affiche fidèlement |
 | **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; toolbar | éditer au clavier passe par le pipeline d'ops |
 | **W5** | Boucle agent + 8 outils = 8 ops + panneau chat streaming | « mets le titre en gras et ajoute un paragraphe d'intro » fonctionne via Claude |
