@@ -76,7 +76,12 @@ export function EditableText({ block, runs, tag, className }: Props) {
     if (!el) return;
     const saved = getSelectionOffsets(el);
     el.innerHTML = runsToHtml(runs);
-    if (saved) setSelection(el, saved.start, saved.end);
+    if (saved) {
+      // Borne sur le nouveau contenu : après un undo qui le raccourcit, le caret
+      // tombe en fin de texte de façon prévisible (pas à une position héritée).
+      const len = Array.from(el.textContent ?? "").length;
+      setSelection(el, Math.min(saved.start, len), Math.min(saved.end, len));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [syncSignal]);
 

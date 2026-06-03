@@ -10,6 +10,8 @@ import { fixtureDoc } from "../render/fixture";
 import { EditorContext, type DispatchOpts, type EditorApi, type PendingFocus } from "./EditorContext";
 import { Toolbar } from "./Toolbar";
 import { ChatPanel } from "./ChatPanel";
+import { CommandPalette, type Command } from "./CommandPalette";
+import { SearchBar } from "./SearchBar";
 
 // Racine de l'éditeur. Le document vit côté Rust (source de vérité) : on le
 // charge au montage, et chaque édition est une `Op` envoyée à `apply_op`. La
@@ -32,6 +34,8 @@ export function Editor() {
   const [path, setPath] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const queue = useRef<Promise<void>>(Promise.resolve());
   const saveChain = useRef<Promise<void>>(Promise.resolve());
@@ -41,6 +45,7 @@ export function Editor() {
   const pathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   const closing = useRef(false); // garde de ré-entrance du flush de fermeture
+  const prevFocus = useRef<HTMLElement | null>(null); // focus à restaurer après un overlay
 
   useEffect(() => {
     docRef.current = doc;
@@ -162,6 +167,64 @@ export function Editor() {
     }
   }, []);
 
+  // Undo/redo : la machinerie (piles d'inverses) vit côté Rust ; ici on rejoue
+  // et on resynchronise tout le rendu (le document change structurellement).
+  // Sérialisés sur la MÊME file que la frappe : une op SetRuns en vol s'applique
+  // forcément avant le undo/redo (sinon le coalescing/les inverses se décalent).
+  // Rust renvoie `null` si la pile était vide → on ne touche alors à rien.
+  const undo = useCallback(() => {
+    queue.current = queue.current.then(async () => {
+      try {
+        const next = await invoke<Document | null>("undo");
+        if (next) {
+          setDoc(next);
+          setSyncSignal((n) => n + 1);
+          markEdited();
+        }
+        setError("");
+      } catch (e) {
+        setError(String(e));
+      }
+    });
+  }, [markEdited]);
+
+  const redo = useCallback(() => {
+    queue.current = queue.current.then(async () => {
+      try {
+        const next = await invoke<Document | null>("redo");
+        if (next) {
+          setDoc(next);
+          setSyncSignal((n) => n + 1);
+          markEdited();
+        }
+        setError("");
+      } catch (e) {
+        setError(String(e));
+      }
+    });
+  }, [markEdited]);
+
+  // Ouverture/fermeture des overlays : on mémorise le focus (l'éditable) à
+  // l'ouverture et on le restaure à la fermeture (le caret n'est pas perdu).
+  const openPalette = useCallback(() => {
+    prevFocus.current = document.activeElement as HTMLElement | null;
+    setSearchOpen(false);
+    setPaletteOpen(true);
+  }, []);
+  const openSearch = useCallback(() => {
+    prevFocus.current = document.activeElement as HTMLElement | null;
+    setPaletteOpen(false);
+    setSearchOpen(true);
+  }, []);
+  const closePalette = useCallback(() => {
+    setPaletteOpen(false);
+    prevFocus.current?.focus?.();
+  }, []);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    prevFocus.current?.focus?.();
+  }, []);
+
   // Nom de base pour les exports (dérivé du fichier courant, sans extension).
   const baseName = useCallback(() => {
     const n = pathRef.current ? pathRef.current.split(/[\\/]/).pop() ?? "document" : "document";
@@ -208,11 +271,16 @@ export function Editor() {
     return () => clearTimeout(t);
   }, [path, dirty, doc, saveTo]);
 
-  // Raccourcis Ctrl/Cmd+S (enregistrer) et Ctrl/Cmd+O (ouvrir).
+  // Raccourcis globaux : enregistrer/ouvrir, annuler/rétablir, palette, recherche.
   useEffect(() => {
     if (!editable) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
+      // Ne pas détourner les raccourcis quand le focus est dans un champ de
+      // saisie (palette, recherche, chat), qui gère son propre undo natif, etc.
+      // Le contentEditable du document n'est PAS un INPUT/TEXTAREA.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
       const k = e.key.toLowerCase();
       if (k === "s") {
         e.preventDefault();
@@ -220,11 +288,25 @@ export function Editor() {
       } else if (k === "o") {
         e.preventDefault();
         void openFile();
+      } else if (k === "z") {
+        // preventDefault neutralise l'undo natif du contentEditable.
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (k === "y") {
+        e.preventDefault();
+        redo();
+      } else if (k === "k") {
+        e.preventDefault();
+        openPalette();
+      } else if (k === "f") {
+        e.preventDefault();
+        openSearch();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editable, saveCurrent, openFile]);
+  }, [editable, saveCurrent, openFile, undo, redo, openPalette, openSearch]);
 
   // Flush à la fermeture : si des modifications sont en attente, on les enregistre
   // (ou on propose un « Enregistrer sous… » pour un brouillon) avant de fermer.
@@ -291,6 +373,18 @@ export function Editor() {
   const status = saving ? "enregistrement…" : dirty ? "non enregistré" : path ? "enregistré" : "non enregistré";
   const dot = saving ? "bg-amber-400" : !path || dirty ? "bg-neutral-300" : "bg-green-500";
 
+  const commands: Command[] = [
+    { id: "open", label: "Ouvrir…", hint: "Ctrl+O", run: () => void openFile() },
+    { id: "save", label: "Enregistrer", hint: "Ctrl+S", run: saveCurrent },
+    { id: "saveas", label: "Enregistrer sous…", run: () => void saveAsFile() },
+    { id: "exp-md", label: "Exporter en Markdown", run: () => void exportMarkdown() },
+    { id: "exp-docx", label: "Exporter en Word (.docx)", run: () => void exportDocx() },
+    { id: "exp-pdf", label: "Exporter en PDF", run: exportPdf },
+    { id: "undo", label: "Annuler", hint: "Ctrl+Z", run: () => void undo() },
+    { id: "redo", label: "Rétablir", hint: "Ctrl+Maj+Z", run: () => void redo() },
+    { id: "search", label: "Rechercher…", hint: "Ctrl+F", run: openSearch },
+  ];
+
   return (
     <EditorContext.Provider value={api}>
       <div className="flex items-start">
@@ -302,9 +396,39 @@ export function Editor() {
                 <FileButton onClick={saveCurrent}>Enregistrer</FileButton>
                 <FileButton onClick={() => void saveAsFile()}>Enregistrer sous…</FileButton>
                 <span className="mx-1 h-5 w-px bg-neutral-200" />
+                <FileButton onClick={() => void undo()} title="Annuler (Ctrl+Z)">
+                  ↶
+                </FileButton>
+                <FileButton onClick={() => void redo()} title="Rétablir (Ctrl+Maj+Z)">
+                  ↷
+                </FileButton>
+                <span className="mx-1 h-5 w-px bg-neutral-200" />
                 <FileButton onClick={() => void exportMarkdown()}>↧ Markdown</FileButton>
                 <FileButton onClick={() => void exportDocx()}>↧ Word</FileButton>
                 <FileButton onClick={exportPdf}>↧ PDF</FileButton>
+                <span className="mx-1 h-5 w-px bg-neutral-200" />
+                <button
+                  type="button"
+                  title="Rechercher (Ctrl+F)"
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // garde le focus de l'éditable
+                    openSearch();
+                  }}
+                  className="rounded px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-100"
+                >
+                  🔍
+                </button>
+                <button
+                  type="button"
+                  title="Palette de commandes (Ctrl+K)"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    openPalette();
+                  }}
+                  className="rounded px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-100"
+                >
+                  ⌘K
+                </button>
                 <span className="ml-auto flex items-center gap-1.5 text-xs text-neutral-500">
                   <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
                   <span className="font-medium text-neutral-700">{fileName}</span>
@@ -327,15 +451,27 @@ export function Editor() {
           {error}
         </div>
       )}
+
+      {paletteOpen && <CommandPalette commands={commands} onClose={closePalette} />}
+      {searchOpen && <SearchBar doc={doc} onClose={closeSearch} />}
     </EditorContext.Provider>
   );
 }
 
-function FileButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+function FileButton({
+  onClick,
+  children,
+  title,
+}: {
+  onClick: () => void;
+  children: ReactNode;
+  title?: string;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className="rounded px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-100"
     >
       {children}

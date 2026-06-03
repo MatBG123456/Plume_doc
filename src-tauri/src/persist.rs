@@ -61,6 +61,7 @@ pub fn open_document(path: String, state: tauri::State<'_, Shared>) -> Result<Do
     s.doc = doc.clone();
     s.undo.clear();
     s.redo.clear();
+    s.last_edit = None;
     Ok(doc)
 }
 

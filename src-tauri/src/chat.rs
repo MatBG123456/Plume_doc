@@ -217,6 +217,7 @@ fn apply_tool(app: &AppHandle, state: &Shared, name: &str, input: &Value) -> (St
         Ok(inverse) => {
             s.undo.push(inverse);
             s.redo.clear();
+            s.last_edit = None; // op agent discrète : pas de coalescing avec la frappe
             let doc = s.doc.clone();
             drop(s); // ne jamais tenir le verrou pendant l'émission/await
             let _ = app.emit("op_applied", json!({ "doc": doc, "op": name }));
