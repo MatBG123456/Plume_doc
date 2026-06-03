@@ -77,10 +77,25 @@ Plume_doc/
 ├── README.md                  # Ce document
 ├── BOOTSTRAP-plume-docs.md    # Spécification complète + plan de build par waves
 │
-└── (à scaffolder — voir Wave 0)
-    ├── src/                   # Front React + Vite + TS + Tailwind
-    ├── src-tauri/             # Shell Tauri (commands : ping, chat_send, open, save…)
-    └── crates/plume-core/     # Modèle, ops, validate, apply, inverse, export
+├── Cargo.toml                 # Workspace Rust (membres : plume-core, src-tauri)
+├── package.json               # Front (Vite, React, TS, Tailwind, CLI Tauri)
+├── vite.config.ts             # Port fixe 1420 attendu par Tauri
+├── tailwind.config.js         # + postcss.config.js
+│
+├── src/                       # Front React + Vite + TS + Tailwind
+│   ├── main.tsx
+│   ├── App.tsx                # Wave 0 : écran de vérification du ping
+│   └── styles.css
+│
+├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
+│   ├── src/lib.rs             # command `ping` → délègue à plume-core
+│   ├── src/main.rs
+│   ├── tauri.conf.json
+│   ├── capabilities/default.json
+│   └── icons/
+│
+└── crates/plume-core/         # Cœur : modèle, ops, validate, apply, inverse, export
+    └── src/lib.rs             # Wave 0 : fn ping() + test
 ```
 
 > Si les 3 apps de la suite passent en monorepo, factoriser le pattern `Op / validate / apply / inverse` dans un crate partagé `atelier-core`.
@@ -167,29 +182,43 @@ Implémentée dans la command Tauri `chat_send` :
 
 ## Démarrage
 
-Le projet est encore au stade **spécification** : le scaffold reste à produire (Wave 0).
+Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`.
 
-1. Place la spec à la racine du repo sous le nom `BOOTSTRAP.md`.
-2. Ouvre Claude Code dans ce dossier.
-3. Prompt de lancement :
-   > « Lis `BOOTSTRAP.md` en entier. Exécute **Wave 0**, puis arrête-toi et liste ce qui a été fait. J'enchaînerai les waves une par une. »
-4. **Règle d'or** : une wave = un commit ; tests verts avant de passer à la suivante ; jamais de saut de wave.
+### Prérequis
 
-Une fois le scaffold en place (Wave 0) :
+- **Node** ≥ 18 et **Rust** (toolchain stable).
+- **Linux** uniquement : les dépendances système de Tauri 2 doivent être installées —
+  `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`
+  (voir la [doc Tauri – prérequis Linux](https://v2.tauri.app/start/prerequisites/)).
+
+### Installer & lancer
 
 ```bash
-# Variable d'environnement requise pour la boucle agent (Wave 5+)
-export ANTHROPIC_API_KEY="sk-ant-..."
+npm install            # dépendances front + CLI Tauri
 
-# Lancer l'app en développement
-npm run tauri dev
+npm run dev            # front seul (Vite, http://localhost:1420)
+npm run tauri dev      # app complète (fenêtre Tauri + cœur Rust)
+
+# Variable requise pour la boucle agent (Wave 5+)
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
+
+### Tests & qualité
+
+```bash
+cargo test -p plume-core            # tests du cœur (ping + à venir : ops)
+cargo fmt --all                     # format Rust
+cargo clippy -p plume-core -- -D warnings
+npm run build                       # tsc + build Vite de production
+```
+
+> Une wave = un commit ; tests verts avant de passer à la suivante ; jamais de saut de wave.
 
 ## Feuille de route
 
 | Wave | Livrable | Critère d'acceptation |
 |---|---|---|
-| **W0** | Scaffold Tauri 2 + Vite/React/TS/Tailwind ; crate `plume-core` ; command `ping` | `npm run tauri dev` ouvre une fenêtre ; `ping` répond depuis Rust |
+| ✅ **W0** | Scaffold Tauri 2 + Vite/React/TS/Tailwind ; crate `plume-core` ; command `ping` | `npm run tauri dev` ouvre une fenêtre ; `ping` répond depuis Rust |
 | **W1** | Modèle + `serde` + doc vide + `ts-rs` | round-trip JSON ⇄ struct ; types TS générés |
 | **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
 | **W3** | Renderer React : blocks → composants DS, curseur, sélection | un doc fixture s'affiche fidèlement |
