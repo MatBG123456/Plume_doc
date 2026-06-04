@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Editor } from "./editor/Editor";
+import { TabManager } from "./editor/TabManager";
 import { Spark } from "./Spark";
 import { Moon, Sun } from "./icons";
 
@@ -71,7 +71,7 @@ function App() {
       </header>
 
       <main className="pb-16">
-        <Editor />
+        <TabManager />
       </main>
     </div>
   );

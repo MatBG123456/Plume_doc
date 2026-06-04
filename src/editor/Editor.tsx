@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Document, Op } from "../bindings";
 import { DocumentView } from "../render/DocumentView";
@@ -24,47 +23,43 @@ import { Download, FileDown, FolderOpen, Redo, Save, Search, Undo, X } from "../
 // sélecteur natif via plugin-dialog) + autosave débouncé. Le **snapshot** du doc
 // est passé à `save_document` (le contenu écrit est lié au chemin) ; un drapeau
 // `dirty` versionné évite d'effacer l'état modifié quand une édition survient
-// pendant un enregistrement ; un flush à la fermeture évite la perte d'édits.
+// pendant un enregistrement.
+//
+// Multi-onglets : le cache de session et le garde-fou de fermeture vivent
+// désormais dans `TabManager`. L'Editor remonte son état via `onState`, reçoit
+// `initialPath`/`initialDirty` au montage, et expose un `flushRef` (drain des ops
+// + autosave) appelé avant chaque bascule d'onglet.
 
 const FILTERS = [{ name: "Plume", extensions: ["json"] }];
 const IMPORT_FILTERS = [
   { name: "Documents (md, txt, docx)", extensions: ["md", "markdown", "txt", "docx"] },
 ];
 
-// Cache de session (localStorage) : permet de fermer sans enregistrer puis de
-// retrouver son travail au prochain lancement (récupération de brouillon).
-const SESSION_KEY = "plume.session";
-type Session = { doc: Document; path: string | null; dirty: boolean };
+type EditorProps = {
+  /** Remonte l'état courant (doc/path/dirty) au gestionnaire d'onglets. */
+  onState?: (s: { doc: Document; path: string | null; dirty: boolean }) => void;
+  /** Chemin/état initiaux (restaurés par l'onglet au montage). */
+  initialPath?: string | null;
+  initialDirty?: boolean;
+  /** Le gestionnaire d'onglets y branche un flush impératif (drain des ops en vol
+   *  + autosave en attente) renvoyant le doc faisant autorité, à appeler AVANT de
+   *  basculer d'onglet — sinon la dernière frappe peut être perdue/corrompue. */
+  flushRef?: { current: (() => Promise<Document | null>) | null };
+};
 
-function cacheSession(doc: Document | null, path: string | null, dirty: boolean) {
-  if (!doc) return;
-  try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ doc, path, dirty }));
-  } catch {
-    // quota dépassé (très gros document) : cache best-effort, on ignore.
-  }
-}
-
-function readSession(): Session | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw) as Session;
-    if (!s || typeof s !== "object" || !s.doc || !Array.isArray(s.doc.blocks)) return null;
-    return s;
-  } catch {
-    return null;
-  }
-}
-
-export function Editor() {
+export function Editor({
+  onState,
+  initialPath = null,
+  initialDirty = false,
+  flushRef,
+}: EditorProps) {
   const [doc, setDoc] = useState<Document | null>(null);
   const [editable, setEditable] = useState(false);
   const [syncSignal, setSyncSignal] = useState(0);
   const [pendingFocus, setPendingFocus] = useState<PendingFocus>(null);
   const [error, setError] = useState("");
-  const [path, setPath] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [path, setPath] = useState<string | null>(initialPath);
+  const [dirty, setDirty] = useState(initialDirty);
   const [saving, setSaving] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -86,7 +81,6 @@ export function Editor() {
   const docRef = useRef<Document | null>(null);
   const pathRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
-  const closing = useRef(false); // garde de ré-entrance du flush de fermeture
   const prevFocus = useRef<HTMLElement | null>(null); // focus à restaurer après un overlay
 
   useEffect(() => {
@@ -95,31 +89,24 @@ export function Editor() {
     dirtyRef.current = dirty;
   });
 
+  // Le document Rust est positionné par le gestionnaire d'onglets (set_document)
+  // avant le montage ; ici on le charge simplement (ou le starter au 1er lancement).
   useEffect(() => {
     invoke<Document>("get_document")
-      .then(async (d) => {
-        setEditable(true);
-        // Restauration de session : si un cache existe, on remet le document Rust
-        // dans cet état (set_document) puis on l'affiche ; sinon, doc de départ.
-        const cached = readSession();
-        if (cached) {
-          try {
-            await invoke("set_document", { doc: cached.doc });
-            setDoc(cached.doc);
-            setPath(cached.path ?? null);
-            setDirty(cached.dirty);
-            return;
-          } catch {
-            // échec de restauration → on retombe sur le doc de départ.
-          }
-        }
+      .then((d) => {
         setDoc(d);
+        setEditable(true);
       })
       .catch(() => {
         setDoc(fixtureDoc);
         setEditable(false);
       });
   }, []);
+
+  // Remonte l'état courant au gestionnaire d'onglets (snapshot + titre + dirty).
+  useEffect(() => {
+    if (editable && doc) onState?.({ doc, path, dirty });
+  }, [editable, doc, path, dirty, onState]);
 
   const markEdited = useCallback(() => {
     rev.current += 1;
@@ -404,13 +391,27 @@ export function Editor() {
     return () => clearTimeout(t);
   }, [path, dirty, doc, saveTo]);
 
-  // Cache de session : ~500 ms après une modification, on persiste {doc, path,
-  // dirty} dans localStorage (récupération au prochain lancement).
+  // Flush impératif pour le gestionnaire d'onglets : draine la file d'ops en vol
+  // (pour ne pas perdre la dernière frappe ni laisser une op s'appliquer au mauvais
+  // document après une bascule), enregistre un autosave en attente, et renvoie le
+  // doc à jour. Branché tant que l'Editor est monté.
   useEffect(() => {
-    if (!editable || !doc) return;
-    const t = setTimeout(() => cacheSession(doc, path, dirty), 500);
-    return () => clearTimeout(t);
-  }, [editable, doc, path, dirty]);
+    if (!flushRef) return;
+    flushRef.current = async () => {
+      await queue.current;
+      if (pathRef.current && dirtyRef.current) {
+        try {
+          await saveTo(pathRef.current, docRef.current ?? fixtureDoc);
+        } catch {
+          // erreur déjà surfacée par saveTo (setError)
+        }
+      }
+      return docRef.current;
+    };
+    return () => {
+      if (flushRef) flushRef.current = null;
+    };
+  }, [flushRef, saveTo]);
 
   // Raccourcis globaux : enregistrer/ouvrir, annuler/rétablir, palette, recherche.
   useEffect(() => {
@@ -449,48 +450,6 @@ export function Editor() {
     return () => window.removeEventListener("keydown", onKey);
   }, [editable, saveCurrent, openFile, undo, redo, openPalette, openSearch]);
 
-  // Flush à la fermeture : si des modifications sont en attente, on les enregistre
-  // (ou on propose un « Enregistrer sous… » pour un brouillon) avant de fermer.
-  useEffect(() => {
-    if (!editable) return;
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const win = getCurrentWindow();
-        const un = await win.onCloseRequested(async (e) => {
-          if (!dirtyRef.current) return; // propre → fermeture normale
-          e.preventDefault();
-          if (closing.current) return; // anti ré-entrance
-          closing.current = true;
-          try {
-            // On NE force PAS l'enregistrement : fermer sans enregistrer reste
-            // possible (le cache de session restaure au prochain lancement) ;
-            // « Annuler » garde la fenêtre ouverte.
-            const close = window.confirm(
-              "Des modifications ne sont pas enregistrées dans un fichier.\n\n" +
-                "OK = fermer (vos modifications seront récupérées au prochain lancement)\n" +
-                "Annuler = rester (Ctrl+S pour enregistrer dans un fichier).",
-            );
-            if (close) {
-              cacheSession(docRef.current, pathRef.current, true); // capture l'état le plus frais
-              await win.destroy();
-            }
-          } finally {
-            closing.current = false;
-          }
-        });
-        if (cancelled) un();
-        else unlisten = un;
-      } catch {
-        // onCloseRequested indisponible (env/capability) → dégradation silencieuse.
-      }
-    })();
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [editable]);
 
   const requestFocus = useCallback((id: string, offset: number) => {
     setPendingFocus({ id, offset });
@@ -553,7 +512,7 @@ export function Editor() {
       <div className={chatOpen ? "lg:pr-[360px]" : ""}>
         <div className="min-w-0">
           {editable && (
-            <div className="sticky top-[49px] z-10 bg-paper/95 backdrop-blur print:hidden">
+            <div className="sticky top-[86px] z-10 bg-paper/95 backdrop-blur print:hidden">
               <div className="flex flex-wrap items-center gap-1 border-b border-line px-3 py-1.5 sm:px-4">
                 <FileButton onClick={() => void openFile()}>
                   <span className="inline-flex items-center gap-1">
@@ -648,7 +607,7 @@ export function Editor() {
       {editable && (
         <>
           <aside
-            className={`fixed bottom-0 right-0 top-[49px] z-30 flex w-[min(360px,92vw)] flex-col border-l border-line bg-paper shadow-pop transition-transform lg:w-[360px] lg:shadow-none print:hidden ${
+            className={`fixed bottom-0 right-0 top-[86px] z-30 flex w-[min(360px,92vw)] flex-col border-l border-line bg-paper shadow-pop transition-transform lg:w-[360px] lg:shadow-none print:hidden ${
               chatOpen ? "translate-x-0" : "translate-x-full"
             }`}
           >
