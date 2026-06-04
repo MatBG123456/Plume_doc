@@ -517,4 +517,76 @@ mod tests {
         assert_eq!(rows.len(), 2, "en-tête + 1 ligne");
         assert_eq!(rows[0].len(), 2, "2 colonnes");
     }
+
+    #[test]
+    fn markdown_lien_code_inline_niveaux() {
+        let md = "## Niveau 2\n\nUn [lien](https://x.org) et du `code`.\n\n### Niveau 3\n";
+        let doc = from_markdown(md);
+        let levels: Vec<u8> = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match &b.node {
+                Node::Heading { level, .. } => Some(*level),
+                _ => None,
+            })
+            .collect();
+        assert!(levels.contains(&2) && levels.contains(&3), "H2 et H3 préservés");
+        let has_link = doc.blocks.iter().any(|b| {
+            matches!(&b.node, Node::Paragraph { runs }
+                if runs.iter().any(|r| r.marks.link.as_deref() == Some("https://x.org")))
+        });
+        let has_code = doc.blocks.iter().any(|b| {
+            matches!(&b.node, Node::Paragraph { runs }
+                if runs.iter().any(|r| r.marks.code && r.text == "code"))
+        });
+        assert!(has_link, "lien inline préservé");
+        assert!(has_code, "code inline préservé");
+    }
+
+    #[test]
+    fn docx_xml_titres_runs_listes() {
+        let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+            <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Mon titre</w:t></w:r></w:p>
+            <w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Section</w:t></w:r></w:p>
+            <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>gras</w:t></w:r><w:r><w:t> normal</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/></w:numPr></w:pPr><w:r><w:t>item</w:t></w:r></w:p>
+        </w:body></w:document>"#;
+        let doc = docx_xml_to_document(xml);
+        assert_eq!(doc.meta.title, "Mon titre", "le 1er Heading1 devient le titre");
+        assert!(
+            doc.blocks.iter().any(|b| matches!(&b.node, Node::Heading { level: 2, runs }
+                if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "Section")),
+            "Heading2 préservé",
+        );
+        let para = doc
+            .blocks
+            .iter()
+            .find_map(|b| match &b.node {
+                Node::Paragraph { runs } => Some(runs),
+                _ => None,
+            })
+            .expect("un paragraphe");
+        assert!(para.iter().any(|r| r.text == "gras" && r.marks.bold), "run gras");
+        assert!(para.iter().any(|r| r.text == " normal" && !r.marks.bold), "run normal");
+        assert!(
+            doc.blocks.iter().any(|b| matches!(&b.node, Node::ListItem { runs, .. }
+                if runs.iter().any(|r| r.text == "item"))),
+            "item de liste (numPr) préservé",
+        );
+    }
+
+    #[test]
+    fn docx_b_val_false_nest_pas_gras() {
+        let xml = r#"<w:document xmlns:w="x"><w:body><w:p><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>x</w:t></w:r></w:p></w:body></w:document>"#;
+        let doc = docx_xml_to_document(xml);
+        let para = doc
+            .blocks
+            .iter()
+            .find_map(|b| match &b.node {
+                Node::Paragraph { runs } => Some(runs),
+                _ => None,
+            })
+            .expect("un paragraphe");
+        assert!(!para[0].marks.bold, "w:val=\"false\" ⇒ pas gras");
+    }
 }
