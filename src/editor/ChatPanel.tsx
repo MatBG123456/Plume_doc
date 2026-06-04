@@ -193,7 +193,7 @@ export function ChatPanel() {
 
   // Détecte si le binaire `claude` est présent (sinon on prévient).
   useEffect(() => {
-    invoke<{ api_key: boolean; claude_cli: boolean }>("detect_chat_providers")
+    invoke<{ claude_cli: boolean }>("detect_chat_providers")
       .then((p) => setCliAvailable(p.claude_cli))
       .catch(() => {});
   }, []);
@@ -233,7 +233,6 @@ export function ChatPanel() {
     try {
       const updated = await invoke<ChatMessage[]>("chat_send", {
         messages: next,
-        provider: "cli",
         model,
         effort,
         focus: focusId,

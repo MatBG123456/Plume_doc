@@ -530,7 +530,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(levels.contains(&2) && levels.contains(&3), "H2 et H3 préservés");
+        assert!(
+            levels.contains(&2) && levels.contains(&3),
+            "H2 et H3 préservés"
+        );
         let has_link = doc.blocks.iter().any(|b| {
             matches!(&b.node, Node::Paragraph { runs }
                 if runs.iter().any(|r| r.marks.link.as_deref() == Some("https://x.org")))
@@ -552,9 +555,14 @@ mod tests {
             <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/></w:numPr></w:pPr><w:r><w:t>item</w:t></w:r></w:p>
         </w:body></w:document>"#;
         let doc = docx_xml_to_document(xml);
-        assert_eq!(doc.meta.title, "Mon titre", "le 1er Heading1 devient le titre");
+        assert_eq!(
+            doc.meta.title, "Mon titre",
+            "le 1er Heading1 devient le titre"
+        );
         assert!(
-            doc.blocks.iter().any(|b| matches!(&b.node, Node::Heading { level: 2, runs }
+            doc.blocks
+                .iter()
+                .any(|b| matches!(&b.node, Node::Heading { level: 2, runs }
                 if runs.iter().map(|r| r.text.as_str()).collect::<String>() == "Section")),
             "Heading2 préservé",
         );
@@ -566,10 +574,18 @@ mod tests {
                 _ => None,
             })
             .expect("un paragraphe");
-        assert!(para.iter().any(|r| r.text == "gras" && r.marks.bold), "run gras");
-        assert!(para.iter().any(|r| r.text == " normal" && !r.marks.bold), "run normal");
         assert!(
-            doc.blocks.iter().any(|b| matches!(&b.node, Node::ListItem { runs, .. }
+            para.iter().any(|r| r.text == "gras" && r.marks.bold),
+            "run gras"
+        );
+        assert!(
+            para.iter().any(|r| r.text == " normal" && !r.marks.bold),
+            "run normal"
+        );
+        assert!(
+            doc.blocks
+                .iter()
+                .any(|b| matches!(&b.node, Node::ListItem { runs, .. }
                 if runs.iter().any(|r| r.text == "item"))),
             "item de liste (numPr) préservé",
         );

@@ -32,7 +32,7 @@
 | Shell | **Tauri 2.x** (cœur Rust + webview) |
 | Front | React + Vite + TypeScript + **Tailwind** (DS Claude : tokens sobres, typographie soignée, peu de chrome) |
 | Core | crate Rust `plume-core` (modèle, ops, validate, apply, export). Types exportés vers TS via **`ts-rs`** |
-| IA | API **Anthropic Messages**, tool use + streaming, appelée **côté Rust** (clé `ANTHROPIC_API_KEY` jamais exposée au webview) |
+| IA | **Claude Code local uniquement** (`claude -p`, streaming), appelé **côté Rust** ; prose + bloc `json` d'opérations. Pas de clé API ni de sélecteur. |
 | Modèle | défaut `claude-sonnet-4-6` (constante de config ; confirme la dernière version Sonnet sur https://docs.claude.com/en/api/overview) |
 
 > Si tu montes les 3 apps en monorepo plus tard, factorise le pattern `Op / validate / apply / inverse` dans un crate `atelier-core` partagé.

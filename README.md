@@ -67,8 +67,8 @@ Plume repose sur une **architecture B** : Claude n'écrit **jamais** de fichier 
 | Shell | **Tauri 2.x** (cœur Rust + webview) |
 | Front | React + Vite + TypeScript + **Tailwind** (design system sobre, typographie soignée, peu de chrome) |
 | Core | crate Rust `plume-core` (modèle, ops, validate, apply, export). Types exportés vers TS via **`ts-rs`** |
-| IA | API **Anthropic Messages**, *tool use* + streaming, appelée **côté Rust** (la clé `ANTHROPIC_API_KEY` n'est jamais exposée au webview) |
-| Modèle par défaut | `claude-sonnet-4-6` (constante de config ; confirmer la dernière version sur la [doc Anthropic](https://docs.claude.com/en/api/overview)) |
+| IA | **Claude Code local uniquement** (`claude -p --output-format stream-json`), appelé **côté Rust** ; le modèle répond en prose + bloc `json` d'opérations. Pas de clé API ni de sélecteur. |
+| Modèle / effort | choisis dans le panneau (`sonnet`/`opus`/`haiku` × `low`…`max`), passés en flags au binaire `claude` |
 
 ## Architecture du projet
 
@@ -280,7 +280,7 @@ npm run build                       # tsc + build Vite de production
 | ✅ **W2** | `Op` + `validate` + `apply` + `inverse` (undo) | tests unitaires : insert / delete / move / setruns / applymark + inverse rejoue l'état initial |
 | ✅ **W3** | Renderer React : blocks → composants DS (`src/render/`), lecture seule | la fixture (toutes variantes de blocs + marques) s'affiche fidèlement |
 | ✅ **W4** | Édition directe : frappe → `SetRuns`/`ApplyMark` ; Entrée → `InsertBlock` ; Backspace → fusion ; toolbar (type de bloc, marques, lien, couleur) | toute édition clavier/souris passe par le pipeline d'ops Rust (`apply_op`) |
-| ✅ **W5** | Boucle agent (`chat_send`, API Anthropic streaming, côté Rust) + 8 outils = 8 ops + panneau chat | « mets le titre en gras et ajoute un paragraphe d'intro » via Claude ; chaque `tool_use` validé+appliqué par le pipeline |
+| ✅ **W5** | Boucle agent (`chat_send`, côté Rust) + panneau chat. *(Désormais : Claude Code local uniquement, prose + bloc `json` d'ops appliquées par le pipeline.)* | « mets le titre en gras et ajoute un paragraphe d'intro » via Claude |
 | ✅ **W6** | Persistance `.plume.json` : open / save / **autosave** (I/O Rust atomique, sélecteur natif, flush à la fermeture) | fermer/rouvrir conserve tout |
 | ✅ **W7** | Export **Markdown** + **`.docx`** (mapping Rust) + **PDF** (impression du webview, CSS `print:`) | les 3 exports ouvrent sans corruption |
 | ✅ **W8** | Polish : undo/redo UI (Cmd+Z, **coalescing** de la frappe), palette de commandes (Ctrl+K), recherche (Ctrl+F), raccourcis | undo multi-niveaux fiable |
