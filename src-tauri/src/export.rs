@@ -241,13 +241,46 @@ fn heading_size(level: u8) -> usize {
     }
 }
 
+/// Définit les styles de titre Word (Title, Heading1..6) : c'est ce qui rend le
+/// `.docx` **structuré** côté Word (volet Navigation, table des matières, plan).
+/// Sans ces styles nommés, des titres « gras + grande taille » restent du corps
+/// de texte aux yeux de Word.
+fn with_heading_styles(mut d: docx_rs::Docx) -> docx_rs::Docx {
+    use docx_rs::*;
+    d = d.add_style(
+        Style::new("Title", StyleType::Paragraph)
+            .name("Title")
+            .bold()
+            .size(48),
+    );
+    for (id, name, size) in [
+        ("Heading1", "heading 1", 36usize),
+        ("Heading2", "heading 2", 32),
+        ("Heading3", "heading 3", 28),
+        ("Heading4", "heading 4", 26),
+        ("Heading5", "heading 5", 24),
+        ("Heading6", "heading 6", 22),
+    ] {
+        d = d.add_style(
+            Style::new(id, StyleType::Paragraph)
+                .name(name)
+                .bold()
+                .size(size),
+        );
+    }
+    d
+}
+
 fn docx_block(docx: docx_rs::Docx, block: &Block) -> docx_rs::Docx {
     use docx_rs::*;
     match &block.node {
         Node::Paragraph { runs } => docx.add_paragraph(docx_para_runs(runs)),
         Node::Heading { level, runs } => {
-            let size = heading_size(*level);
-            let mut p = Paragraph::new();
+            let lvl = (*level).clamp(1, 6);
+            let size = heading_size(lvl);
+            // Style Word réel (HeadingN) → plan / volet Navigation / TOC ; on garde
+            // aussi gras+taille pour un rendu correct quel que soit le lecteur.
+            let mut p = Paragraph::new().style(&format!("Heading{lvl}"));
             for r in runs {
                 p = p.add_run(docx_run(r).bold().size(size));
             }
@@ -315,10 +348,14 @@ fn docx_block(docx: docx_rs::Docx, block: &Block) -> docx_rs::Docx {
 /// mise à jour de la lib.
 pub fn to_docx(doc: &Document) -> Result<Vec<u8>, String> {
     use docx_rs::*;
-    let mut d = Docx::new();
+    let mut d = with_heading_styles(Docx::new());
     let title = doc.meta.title.trim();
     if !title.is_empty() {
-        d = d.add_paragraph(Paragraph::new().add_run(Run::new().add_text(title).bold().size(48)));
+        d = d.add_paragraph(
+            Paragraph::new()
+                .style("Title")
+                .add_run(Run::new().add_text(title).bold().size(48)),
+        );
     }
     for block in &doc.blocks {
         d = docx_block(d, block);

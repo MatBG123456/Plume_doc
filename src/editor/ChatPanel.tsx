@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Spark } from "../Spark";
 
 // Panneau de chat. Le provider est **toujours** « Claude Code (CLI local) » : on
 // délègue au binaire `claude` que l'utilisateur a installé/authentifié (son
@@ -63,6 +64,23 @@ function Bubble({ d }: { d: Display }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Indicateur d'attente : la mascotte tourne + trois points qui rebondissent. */
+function ThinkingBubble() {
+  return (
+    <div className="flex justify-start">
+      <div className="flex items-center gap-2 rounded-row bg-card px-3 py-2 text-sm text-muted ring-1 ring-line">
+        <Spark className="h-4 w-4 text-coral" spinning />
+        <span>Réflexion</span>
+        <span className="inline-flex gap-0.5">
+          <span className="h-1 w-1 animate-bounce rounded-full bg-faint [animation-delay:-0.3s]" />
+          <span className="h-1 w-1 animate-bounce rounded-full bg-faint [animation-delay:-0.15s]" />
+          <span className="h-1 w-1 animate-bounce rounded-full bg-faint" />
+        </span>
       </div>
     </div>
   );
@@ -200,7 +218,12 @@ export function ChatPanel() {
             <Bubble key={`live-${i}`} d={{ role: "assistant", text: t, tools: [] }} />
           ))}
 
-        {busy && <Bubble d={{ role: "assistant", text: streaming || "…", tools: [] }} />}
+        {busy &&
+          (streaming.trim() !== "" ? (
+            <Bubble d={{ role: "assistant", text: streaming, tools: [] }} />
+          ) : (
+            <ThinkingBubble />
+          ))}
       </div>
 
       <div className="border-t border-line p-3">

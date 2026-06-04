@@ -65,6 +65,18 @@ pub fn open_document(path: String, state: tauri::State<'_, Shared>) -> Result<Do
     Ok(doc)
 }
 
+/// Remplace le document courant par celui fourni (sans I/O fichier) : utilisé
+/// pour restaurer un cache de session au démarrage. Vide undo/redo.
+#[tauri::command]
+pub fn set_document(doc: Document, state: tauri::State<'_, Shared>) -> Result<(), String> {
+    let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+    s.doc = doc;
+    s.undo.clear();
+    s.redo.clear();
+    s.last_edit = None;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

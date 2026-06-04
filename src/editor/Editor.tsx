@@ -26,6 +26,32 @@ import { Spark } from "../Spark";
 
 const FILTERS = [{ name: "Plume", extensions: ["json"] }];
 
+// Cache de session (localStorage) : permet de fermer sans enregistrer puis de
+// retrouver son travail au prochain lancement (récupération de brouillon).
+const SESSION_KEY = "plume.session";
+type Session = { doc: Document; path: string | null; dirty: boolean };
+
+function cacheSession(doc: Document | null, path: string | null, dirty: boolean) {
+  if (!doc) return;
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ doc, path, dirty }));
+  } catch {
+    // quota dépassé (très gros document) : cache best-effort, on ignore.
+  }
+}
+
+function readSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw) as Session;
+    if (!s || typeof s !== "object" || !s.doc || !Array.isArray(s.doc.blocks)) return null;
+    return s;
+  } catch {
+    return null;
+  }
+}
+
 export function Editor() {
   const [doc, setDoc] = useState<Document | null>(null);
   const [editable, setEditable] = useState(false);
@@ -37,7 +63,14 @@ export function Editor() {
   const [saving, setSaving] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false); // tiroir chat sur petit écran
+  // Ouverture du chat : par défaut ouvert sur grand écran, fermé sur petit ;
+  // mémorisé. Le document récupère la largeur quand le chat est fermé.
+  const [chatOpen, setChatOpen] = useState(() => {
+    const s = localStorage.getItem("plume.chatOpen");
+    if (s === "1") return true;
+    if (s === "0") return false;
+    return window.matchMedia?.("(min-width: 1024px)").matches ?? true;
+  });
 
   const queue = useRef<Promise<void>>(Promise.resolve());
   const saveChain = useRef<Promise<void>>(Promise.resolve());
@@ -57,9 +90,23 @@ export function Editor() {
 
   useEffect(() => {
     invoke<Document>("get_document")
-      .then((d) => {
-        setDoc(d);
+      .then(async (d) => {
         setEditable(true);
+        // Restauration de session : si un cache existe, on remet le document Rust
+        // dans cet état (set_document) puis on l'affiche ; sinon, doc de départ.
+        const cached = readSession();
+        if (cached) {
+          try {
+            await invoke("set_document", { doc: cached.doc });
+            setDoc(cached.doc);
+            setPath(cached.path ?? null);
+            setDirty(cached.dirty);
+            return;
+          } catch {
+            // échec de restauration → on retombe sur le doc de départ.
+          }
+        }
+        setDoc(d);
       })
       .catch(() => {
         setDoc(fixtureDoc);
@@ -273,6 +320,14 @@ export function Editor() {
     return () => clearTimeout(t);
   }, [path, dirty, doc, saveTo]);
 
+  // Cache de session : ~500 ms après une modification, on persiste {doc, path,
+  // dirty} dans localStorage (récupération au prochain lancement).
+  useEffect(() => {
+    if (!editable || !doc) return;
+    const t = setTimeout(() => cacheSession(doc, path, dirty), 500);
+    return () => clearTimeout(t);
+  }, [editable, doc, path, dirty]);
+
   // Raccourcis globaux : enregistrer/ouvrir, annuler/rétablir, palette, recherche.
   useEffect(() => {
     if (!editable) return;
@@ -320,20 +375,22 @@ export function Editor() {
       try {
         const win = getCurrentWindow();
         const un = await win.onCloseRequested(async (e) => {
-          if (!dirtyRef.current) return; // rien à flusher → fermeture normale
+          if (!dirtyRef.current) return; // propre → fermeture normale
           e.preventDefault();
-          if (closing.current) return; // flush déjà en cours (anti ré-entrance)
+          if (closing.current) return; // anti ré-entrance
           closing.current = true;
           try {
-            if (pathRef.current) {
-              await saveTo(pathRef.current, docRef.current ?? fixtureDoc);
+            // On NE force PAS l'enregistrement : fermer sans enregistrer reste
+            // possible (le cache de session restaure au prochain lancement) ;
+            // « Annuler » garde la fenêtre ouverte.
+            const close = window.confirm(
+              "Des modifications ne sont pas enregistrées dans un fichier.\n\n" +
+                "OK = fermer (vos modifications seront récupérées au prochain lancement)\n" +
+                "Annuler = rester (Ctrl+S pour enregistrer dans un fichier).",
+            );
+            if (close) {
+              cacheSession(docRef.current, pathRef.current, true); // capture l'état le plus frais
               await win.destroy();
-            } else {
-              const keep = window.confirm(
-                "Document non enregistré. Enregistrer avant de fermer ?\n\nOK = enregistrer · Annuler = fermer sans enregistrer.",
-              );
-              if (!keep) await win.destroy(); // fermer sans enregistrer
-              else if (await saveAsFile()) await win.destroy(); // annulé → rester ouvert
             }
           } finally {
             closing.current = false;
@@ -349,13 +406,22 @@ export function Editor() {
       cancelled = true;
       unlisten?.();
     };
-  }, [editable, saveTo, saveAsFile]);
+  }, [editable]);
 
   const requestFocus = useCallback((id: string, offset: number) => {
     setPendingFocus({ id, offset });
   }, []);
 
   const clearFocus = useCallback(() => setPendingFocus(null), []);
+
+  const toggleChat = useCallback(
+    () =>
+      setChatOpen((v) => {
+        localStorage.setItem("plume.chatOpen", v ? "0" : "1");
+        return !v;
+      }),
+    [],
+  );
 
   if (!doc) {
     return <div className="p-10 text-sm text-faint">Chargement du document…</div>;
@@ -389,8 +455,8 @@ export function Editor() {
 
   return (
     <EditorContext.Provider value={api}>
-      {/* Zone document : sur grand écran (lg) on réserve la largeur du chat. */}
-      <div className="lg:pr-[360px]">
+      {/* Zone document : réserve la largeur du chat sur grand écran s'il est ouvert. */}
+      <div className={chatOpen ? "lg:pr-[360px]" : ""}>
         <div className="min-w-0">
           {editable && (
             <div className="sticky top-[49px] z-10 bg-paper/95 backdrop-blur print:hidden">
@@ -432,6 +498,19 @@ export function Editor() {
                 >
                   ⌘K
                 </button>
+                <span className="mx-1 hidden h-5 w-px bg-line lg:block" />
+                <button
+                  type="button"
+                  title={chatOpen ? "Masquer l'assistant" : "Afficher l'assistant"}
+                  onClick={toggleChat}
+                  className={`hidden items-center gap-1 rounded-md px-2 py-1 text-sm lg:inline-flex ${
+                    chatOpen
+                      ? "bg-coral-soft text-coral-ink"
+                      : "text-muted hover:bg-coral-soft hover:text-coral-ink"
+                  }`}
+                >
+                  <Spark className="h-3.5 w-3.5" /> Assistant
+                </button>
                 <span className="ml-auto flex items-center gap-1.5 text-xs text-muted">
                   <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
                   <span className="font-medium text-ink">{fileName}</span>
@@ -445,29 +524,38 @@ export function Editor() {
         </div>
       </div>
 
-      {/* Chat : panneau fixe à droite (desktop), tiroir coulissant (mobile). */}
+      {/* Chat : panneau latéral (desktop) / tiroir coulissant (mobile),
+          ouvrable et fermable à toute taille. */}
       {editable && (
         <>
           <aside
-            className={`fixed bottom-0 right-0 top-[49px] z-30 flex w-[min(360px,92vw)] flex-col border-l border-line bg-paper transition-transform lg:w-[360px] lg:translate-x-0 lg:shadow-none print:hidden ${
-              chatOpen ? "translate-x-0 shadow-pop" : "translate-x-full"
+            className={`fixed bottom-0 right-0 top-[49px] z-30 flex w-[min(360px,92vw)] flex-col border-l border-line bg-paper shadow-pop transition-transform lg:w-[360px] lg:shadow-none print:hidden ${
+              chatOpen ? "translate-x-0" : "translate-x-full"
             }`}
           >
             <ChatPanel />
           </aside>
+          {/* Fond cliquable (mobile seulement) quand le tiroir est ouvert. */}
           {chatOpen && (
             <div
               className="fixed inset-0 z-20 bg-ink/20 lg:hidden print:hidden"
-              onClick={() => setChatOpen(false)}
+              onClick={toggleChat}
             />
           )}
+          {/* Bouton flottant (mobile) : ouvre/ferme l'assistant. */}
           <button
             type="button"
-            onClick={() => setChatOpen((v) => !v)}
-            title="Assistant"
+            onClick={toggleChat}
+            title={chatOpen ? "Fermer l'assistant" : "Assistant"}
             className="fixed bottom-4 right-4 z-40 flex items-center gap-1.5 rounded-pill bg-coral px-4 py-2.5 text-sm font-medium text-white shadow-pop lg:hidden print:hidden"
           >
-            <Spark className="h-4 w-4" /> Assistant
+            {chatOpen ? (
+              "✕"
+            ) : (
+              <>
+                <Spark className="h-4 w-4" /> Assistant
+              </>
+            )}
           </button>
         </>
       )}

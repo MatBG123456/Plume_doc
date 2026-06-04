@@ -165,6 +165,7 @@ pub fn run() {
             chat::detect_chat_providers,
             persist::save_document,
             persist::open_document,
+            persist::set_document,
             export::export_markdown,
             export::export_docx
         ])
