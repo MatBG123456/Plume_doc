@@ -703,10 +703,14 @@ fn extract_json_object(s: &str) -> Option<&str> {
 }
 
 /// Provider CLI : un appel à `claude`, puis application des ops du JSON renvoyé.
+/// `model` (alias `sonnet`/`opus`/…) et `effort` (low/medium/high/xhigh/max) sont
+/// passés au CLI s'ils sont fournis.
 async fn run_cli_agent(
     app: AppHandle,
     state: &Shared,
     mut messages: Vec<ChatMessage>,
+    model: String,
+    effort: String,
 ) -> Vec<ChatMessage> {
     let claude = match find_claude() {
         Some(p) => p,
@@ -727,10 +731,14 @@ async fn run_cli_agent(
 
     // `claude -p` lit le prompt sur stdin (évite les limites de longueur d'arg).
     let mut cmd = claude_command(&claude);
-    cmd.arg("-p")
-        .arg("--output-format")
-        .arg("text")
-        .stdin(Stdio::piped())
+    cmd.arg("-p").arg("--output-format").arg("text");
+    if !model.trim().is_empty() {
+        cmd.arg("--model").arg(model.trim());
+    }
+    if !effort.trim().is_empty() {
+        cmd.arg("--effort").arg(effort.trim());
+    }
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -842,11 +850,13 @@ async fn run_cli_agent(
 pub async fn chat_send(
     messages: Vec<ChatMessage>,
     provider: String,
+    model: String,
+    effort: String,
     app: AppHandle,
     state: tauri::State<'_, Shared>,
 ) -> Result<Vec<ChatMessage>, String> {
     if provider == "cli" {
-        return Ok(run_cli_agent(app, state.inner(), messages).await);
+        return Ok(run_cli_agent(app, state.inner(), messages, model, effort).await);
     }
     // Défaut : API Anthropic (clé).
     let api_key = match std::env::var("ANTHROPIC_API_KEY") {

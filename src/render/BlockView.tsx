@@ -17,7 +17,7 @@ const HEADING: Record<number, string> = {
   3: "mb-2 mt-6 text-2xl font-semibold",
   4: "mb-2 mt-5 text-xl font-semibold",
   5: "mb-2 mt-4 text-lg font-semibold",
-  6: "mb-2 mt-4 text-base font-semibold uppercase tracking-wide text-neutral-500",
+  6: "mb-2 mt-4 text-base font-semibold uppercase tracking-wide text-muted",
 };
 
 /** Balise HTML correspondant au niveau de titre (1..=6). */
@@ -73,12 +73,12 @@ export function BlockView({ block }: { block: Block }): ReactNode {
           block={block}
           runs={node.runs}
           tag="blockquote"
-          className="my-4 border-l-4 border-neutral-300 pl-4 italic text-neutral-600"
+          className="my-4 border-l-4 border-coral/40 pl-4 italic text-muted"
         />
       ) : (
         <blockquote
           data-block-id={anchor}
-          className="my-4 border-l-4 border-neutral-300 pl-4 italic text-neutral-600"
+          className="my-4 border-l-4 border-coral/40 pl-4 italic text-muted"
         >
           <RunsView runs={node.runs} />
         </blockquote>
@@ -88,11 +88,11 @@ export function BlockView({ block }: { block: Block }): ReactNode {
       return (
         <figure data-block-id={anchor} className="my-4">
           {node.lang && (
-            <figcaption className="mb-1 font-mono text-xs uppercase tracking-wide text-neutral-400">
+            <figcaption className="mb-1 font-mono text-xs uppercase tracking-wide text-faint">
               {node.lang}
             </figcaption>
           )}
-          <pre className="overflow-x-auto rounded-lg bg-neutral-900 p-4 text-sm text-neutral-100 print:bg-neutral-100 print:text-neutral-900 print:ring-1 print:ring-neutral-300">
+          <pre className="overflow-x-auto rounded-row bg-ink/[0.04] p-4 text-sm text-ink ring-1 ring-line">
             <code className="whitespace-pre font-mono print:whitespace-pre-wrap print:break-words">
               {node.text}
             </code>
@@ -112,7 +112,7 @@ export function BlockView({ block }: { block: Block }): ReactNode {
                       key={c}
                       data-row={r}
                       data-col={c}
-                      className="border border-neutral-300 px-3 py-1.5 align-top"
+                      className="border border-line px-3 py-1.5 align-top"
                     >
                       <RunsView runs={cell.runs} />
                     </td>
@@ -131,10 +131,10 @@ export function BlockView({ block }: { block: Block }): ReactNode {
             src={node.src}
             alt={node.alt}
             style={node.width_pct !== null ? { width: `${node.width_pct}%` } : undefined}
-            className="h-auto max-w-full rounded ring-1 ring-neutral-200"
+            className="h-auto max-w-full rounded-row ring-1 ring-line"
           />
           {node.alt !== "" && (
-            <figcaption className="mt-2 text-xs text-neutral-500">{node.alt}</figcaption>
+            <figcaption className="mt-2 text-xs text-faint">{node.alt}</figcaption>
           )}
         </figure>
       );
@@ -152,11 +152,11 @@ export function BlockView({ block }: { block: Block }): ReactNode {
               est porté par `break-after-page` sur le conteneur). */}
           <div
             aria-hidden="true"
-            className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-neutral-400 print:hidden"
+            className="flex items-center gap-3 text-[11px] uppercase tracking-widest text-faint print:hidden"
           >
-            <span className="h-px flex-1 bg-neutral-200" />
+            <span className="h-px flex-1 bg-line" />
             saut de page
-            <span className="h-px flex-1 bg-neutral-200" />
+            <span className="h-px flex-1 bg-line" />
           </div>
         </div>
       );

@@ -86,7 +86,7 @@ export function SearchBar({ doc, onClose }: { doc: Document; onClose: () => void
   };
 
   return (
-    <div className="fixed left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg bg-white px-3 py-2 shadow-lg ring-1 ring-neutral-200 print:hidden">
+    <div className="fixed left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-pill bg-card px-3 py-2 shadow-pop ring-1 ring-line print:hidden">
       <input
         autoFocus
         value={query}
@@ -101,9 +101,9 @@ export function SearchBar({ doc, onClose }: { doc: Document; onClose: () => void
           }
         }}
         placeholder="Rechercher…"
-        className="w-56 text-sm outline-none"
+        className="w-56 bg-transparent text-sm text-ink outline-none placeholder:text-faint"
       />
-      <span className="min-w-14 text-right font-mono text-xs text-neutral-500">
+      <span className="min-w-14 text-right font-mono text-xs text-muted">
         {matches.length === 0
           ? query.trim() === ""
             ? ""
@@ -114,7 +114,7 @@ export function SearchBar({ doc, onClose }: { doc: Document; onClose: () => void
         type="button"
         onClick={() => go(-1)}
         title="Précédent (Maj+Entrée)"
-        className="rounded px-1.5 py-0.5 text-sm text-neutral-600 hover:bg-neutral-100"
+        className="rounded-md px-1.5 py-0.5 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
       >
         ↑
       </button>
@@ -122,7 +122,7 @@ export function SearchBar({ doc, onClose }: { doc: Document; onClose: () => void
         type="button"
         onClick={() => go(1)}
         title="Suivant (Entrée)"
-        className="rounded px-1.5 py-0.5 text-sm text-neutral-600 hover:bg-neutral-100"
+        className="rounded-md px-1.5 py-0.5 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
       >
         ↓
       </button>
@@ -130,7 +130,7 @@ export function SearchBar({ doc, onClose }: { doc: Document; onClose: () => void
         type="button"
         onClick={onClose}
         title="Fermer (Échap)"
-        className="rounded px-1.5 py-0.5 text-sm text-neutral-600 hover:bg-neutral-100"
+        className="rounded-md px-1.5 py-0.5 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
       >
         ✕
       </button>

@@ -184,7 +184,7 @@ export function EditableText({ block, runs, tag, className }: Props) {
     spellCheck: true,
     "data-block-id": block.id,
     "data-editable-block": block.id,
-    className: `${className} rounded-sm outline-none focus:bg-neutral-50`,
+    className: `${className} rounded-sm outline-none focus:bg-coral-soft/40`,
     onInput,
     onKeyDown,
     onFocus: () => {

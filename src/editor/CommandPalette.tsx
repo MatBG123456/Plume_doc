@@ -30,11 +30,11 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-[15vh] print:hidden"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/20 pt-[15vh] print:hidden"
       onMouseDown={onClose}
     >
       <div
-        className="w-[540px] max-w-[90vw] overflow-hidden rounded-lg bg-white shadow-2xl ring-1 ring-neutral-200"
+        className="w-[540px] max-w-[90vw] overflow-hidden rounded-panel bg-card shadow-pop ring-1 ring-line"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <input
@@ -57,11 +57,11 @@ export function CommandPalette({
             }
           }}
           placeholder="Tapez une commande…"
-          className="w-full border-b border-neutral-200 px-4 py-3 text-sm outline-none"
+          className="w-full border-b border-line bg-transparent px-4 py-3 text-sm text-ink outline-none placeholder:text-faint"
         />
         <ul className="max-h-[50vh] overflow-y-auto py-1">
           {filtered.length === 0 && (
-            <li className="px-4 py-2 text-sm text-neutral-400">Aucune commande</li>
+            <li className="px-4 py-2 text-sm text-faint">Aucune commande</li>
           )}
           {filtered.map((c, i) => (
             <li key={c.id}>
@@ -73,11 +73,11 @@ export function CommandPalette({
                   exec(c);
                 }}
                 className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${
-                  i === sel ? "bg-neutral-100" : "hover:bg-neutral-50"
+                  i === sel ? "bg-coral-soft text-coral-ink" : "text-ink hover:bg-coral-soft/50"
                 }`}
               >
                 <span>{c.label}</span>
-                {c.hint && <span className="font-mono text-xs text-neutral-400">{c.hint}</span>}
+                {c.hint && <span className="font-mono text-xs text-faint">{c.hint}</span>}
               </button>
             </li>
           ))}

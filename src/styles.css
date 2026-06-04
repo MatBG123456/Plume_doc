@@ -3,8 +3,10 @@
 @tailwind utilities;
 
 :root {
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  color-scheme: light dark;
+  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+  color: #23211c; /* ink */
+  background: #f6f4ee; /* paper */
 }
 
 /* Export PDF (impression du webview) : marge de page raisonnable. */

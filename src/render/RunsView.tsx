@@ -20,7 +20,7 @@ function RunView({ run }: { run: Run }): ReactNode {
     // couleur `marks.color` (via le span). Bleu seulement si aucune couleur.
     const linkClass =
       marks.color === null
-        ? "text-blue-600 underline-offset-2 hover:text-blue-700"
+        ? "text-coral underline-offset-2 hover:text-coral-ink"
         : "underline-offset-2 hover:opacity-80";
     return (
       <a href={marks.link} target="_blank" rel="noreferrer" className={linkClass}>

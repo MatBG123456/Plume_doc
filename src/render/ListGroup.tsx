@@ -93,7 +93,7 @@ function renderLevel(
     containers.push(
       <Tag
         key={group[0].key}
-        className={`my-3 space-y-1 pl-6 ${ordered ? "list-decimal" : "list-disc"} marker:text-neutral-400`}
+        className={`my-3 space-y-1 pl-6 ${ordered ? "list-decimal" : "list-disc"} marker:text-faint`}
       >
         {group.map((e) => e.node)}
       </Tag>,

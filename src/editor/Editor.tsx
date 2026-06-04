@@ -356,7 +356,7 @@ export function Editor() {
   const clearFocus = useCallback(() => setPendingFocus(null), []);
 
   if (!doc) {
-    return <div className="p-10 text-sm text-neutral-400">Chargement du document…</div>;
+    return <div className="p-10 text-sm text-faint">Chargement du document…</div>;
   }
 
   const api: EditorApi = {
@@ -371,7 +371,7 @@ export function Editor() {
 
   const fileName = path ? path.split(/[\\/]/).pop() ?? path : "Brouillon";
   const status = saving ? "enregistrement…" : dirty ? "non enregistré" : path ? "enregistré" : "non enregistré";
-  const dot = saving ? "bg-amber-400" : !path || dirty ? "bg-neutral-300" : "bg-green-500";
+  const dot = saving ? "bg-coral" : !path || dirty ? "bg-faint/60" : "bg-teal";
 
   const commands: Command[] = [
     { id: "open", label: "Ouvrir…", hint: "Ctrl+O", run: () => void openFile() },
@@ -390,23 +390,23 @@ export function Editor() {
       <div className="flex items-start">
         <div className="min-w-0 flex-1">
           {editable && (
-            <div className="sticky top-[49px] z-10 bg-white/95 backdrop-blur print:hidden">
-              <div className="flex items-center gap-1 border-b border-neutral-200 px-4 py-1.5">
+            <div className="sticky top-[49px] z-10 bg-paper/95 backdrop-blur print:hidden">
+              <div className="flex items-center gap-1 border-b border-line px-4 py-1.5">
                 <FileButton onClick={() => void openFile()}>Ouvrir</FileButton>
                 <FileButton onClick={saveCurrent}>Enregistrer</FileButton>
                 <FileButton onClick={() => void saveAsFile()}>Enregistrer sous…</FileButton>
-                <span className="mx-1 h-5 w-px bg-neutral-200" />
+                <span className="mx-1 h-5 w-px bg-line" />
                 <FileButton onClick={() => void undo()} title="Annuler (Ctrl+Z)">
                   ↶
                 </FileButton>
                 <FileButton onClick={() => void redo()} title="Rétablir (Ctrl+Maj+Z)">
                   ↷
                 </FileButton>
-                <span className="mx-1 h-5 w-px bg-neutral-200" />
+                <span className="mx-1 h-5 w-px bg-line" />
                 <FileButton onClick={() => void exportMarkdown()}>↧ Markdown</FileButton>
                 <FileButton onClick={() => void exportDocx()}>↧ Word</FileButton>
                 <FileButton onClick={exportPdf}>↧ PDF</FileButton>
-                <span className="mx-1 h-5 w-px bg-neutral-200" />
+                <span className="mx-1 h-5 w-px bg-line" />
                 <button
                   type="button"
                   title="Rechercher (Ctrl+F)"
@@ -414,7 +414,7 @@ export function Editor() {
                     e.preventDefault(); // garde le focus de l'éditable
                     openSearch();
                   }}
-                  className="rounded px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-100"
+                  className="rounded-md px-2 py-1 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
                 >
                   🔍
                 </button>
@@ -425,13 +425,13 @@ export function Editor() {
                     e.preventDefault();
                     openPalette();
                   }}
-                  className="rounded px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-100"
+                  className="rounded-md px-2 py-1 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
                 >
                   ⌘K
                 </button>
-                <span className="ml-auto flex items-center gap-1.5 text-xs text-neutral-500">
+                <span className="ml-auto flex items-center gap-1.5 text-xs text-muted">
                   <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-                  <span className="font-medium text-neutral-700">{fileName}</span>
+                  <span className="font-medium text-ink">{fileName}</span>
                   <span>· {status}</span>
                 </span>
               </div>
@@ -441,13 +441,13 @@ export function Editor() {
           <DocumentView doc={doc} />
         </div>
         {editable && (
-          <aside className="sticky top-[49px] h-[calc(100vh-49px)] w-[340px] shrink-0 border-l border-neutral-200 bg-neutral-50 print:hidden">
+          <aside className="sticky top-[49px] h-[calc(100vh-49px)] w-[360px] shrink-0 border-l border-line bg-paper print:hidden">
             <ChatPanel />
           </aside>
         )}
       </div>
       {error && (
-        <div className="fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-md bg-red-600 px-4 py-2 text-sm text-white shadow-lg print:hidden">
+        <div className="fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-pill bg-deny px-4 py-2 text-sm text-white shadow-soft print:hidden">
           {error}
         </div>
       )}
@@ -472,7 +472,7 @@ function FileButton({
       type="button"
       onClick={onClick}
       title={title}
-      className="rounded px-2 py-1 text-sm text-neutral-700 hover:bg-neutral-100"
+      className="rounded-md px-2 py-1 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
     >
       {children}
     </button>

@@ -31,7 +31,7 @@ function Tool({
         e.preventDefault();
         onAction();
       }}
-      className="flex h-8 min-w-8 items-center justify-center rounded px-2 text-sm text-neutral-700 hover:bg-neutral-200"
+      className="flex h-8 min-w-8 items-center justify-center rounded-md px-2 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
     >
       {children}
     </button>
@@ -39,7 +39,7 @@ function Tool({
 }
 
 function Separator() {
-  return <span className="mx-1 h-5 w-px bg-neutral-200" />;
+  return <span className="mx-1 h-5 w-px bg-line" />;
 }
 
 const BLOCK_KINDS: { kind: BlockKind; label: string; title: string }[] = [
@@ -67,7 +67,7 @@ export function Toolbar() {
   if (!editor) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-0.5 border-b border-neutral-200 px-4 py-1.5">
+    <div className="flex flex-wrap items-center gap-0.5 border-b border-line px-4 py-1.5">
       {BLOCK_KINDS.map((b) => (
         <Tool key={b.kind} title={b.title} onAction={() => setBlockType(editor, b.kind)}>
           {b.label}
@@ -99,12 +99,12 @@ export function Toolbar() {
             e.preventDefault();
             setColor(editor, c);
           }}
-          className="h-5 w-5 rounded-full ring-1 ring-neutral-300"
+          className="h-5 w-5 rounded-full ring-1 ring-line"
           style={{ backgroundColor: c }}
         />
       ))}
       <Tool title="Retirer la couleur" onAction={() => setColor(editor, null)}>
-        <span className="text-xs text-neutral-500">✕</span>
+        <span className="text-xs text-muted">✕</span>
       </Tool>
     </div>
   );

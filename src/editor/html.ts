@@ -25,7 +25,7 @@ function styleAttr(run: Run): string {
 function classAttr(run: Run): string {
   const classes = [markClass(run.marks)];
   // Affordance lien : bleu par défaut quand aucune couleur n'est fixée.
-  if (run.marks.link !== null && run.marks.color === null) classes.push("text-blue-600");
+  if (run.marks.link !== null && run.marks.color === null) classes.push("text-coral");
   const cn = classes.filter(Boolean).join(" ");
   return cn ? ` class="${cn}"` : "";
 }

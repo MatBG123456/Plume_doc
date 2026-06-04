@@ -33,7 +33,7 @@ export function markClass(marks: Marks): string {
     marks.bold && "font-bold",
     marks.italic && "italic",
     marks.code &&
-      "rounded bg-neutral-100 px-1 py-0.5 font-mono text-[0.9em] text-neutral-800",
+      "rounded bg-ink/[0.06] px-1 py-0.5 font-mono text-[0.9em] text-ink",
   ]
     .filter(Boolean)
     .join(" ");
