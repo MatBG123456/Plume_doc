@@ -2,6 +2,7 @@ import type { MarkPatch, Node as DocNode, Run } from "../bindings";
 import type { EditorApi } from "./EditorContext";
 import { getSelectionOffsets } from "./caret";
 import { reconcile, runsToChars } from "./text";
+import { newTable } from "./tableOps";
 
 // Actions de la barre d'outils et des raccourcis clavier. Toutes opèrent sur la
 // **sélection courante** : on retrouve le bloc éditable hôte via l'attribut
@@ -130,4 +131,37 @@ export function setBlockType(editor: EditorApi, kind: BlockKind): void {
   if (!block) return;
   const runs = nodeRuns(block.node) ?? [];
   editor.dispatch({ op: "SetNode", id: active.id, node: nodeForKind(kind, runs) }, { sync: true });
+}
+
+function makeId(): string {
+  const c = globalThis.crypto;
+  if (c && "randomUUID" in c) return c.randomUUID();
+  return `b-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+/** Bloc (texte OU table) contenant la sélection, via le wrapper `data-block-id`. */
+function activeBlockId(): string | null {
+  const sel = window.getSelection();
+  const node = sel?.anchorNode ?? null;
+  const el = node instanceof HTMLElement ? node : (node?.parentElement ?? null);
+  const host = el?.closest<HTMLElement>("[data-block-id]") ?? null;
+  return host?.getAttribute("data-block-id") ?? null;
+}
+
+/** Épingle le bloc contenant la sélection comme contexte PRIORITAIRE pour l'assistant. */
+export function targetActiveBlock(editor: EditorApi): void {
+  const id = activeBlockId();
+  if (id) editor.setFocus(id);
+}
+
+/** Insère un tableau (2×2 par défaut) après le bloc courant (sinon à la fin). */
+export function insertTable(editor: EditorApi, rows = 2, cols = 2): void {
+  const active = activeHost();
+  const blocks = editor.doc.blocks;
+  const idx = active ? blocks.findIndex((b) => b.id === active.id) : -1;
+  const at = idx < 0 ? blocks.length : idx + 1;
+  editor.dispatch(
+    { op: "InsertBlock", at, block: { id: makeId(), node: newTable(rows, cols) } },
+    { sync: true },
+  );
 }

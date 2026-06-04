@@ -14,7 +14,7 @@
 use std::process::Stdio;
 
 use futures_util::StreamExt;
-use plume_core::{apply, Document, Op};
+use plume_core::{apply, Document, Node, Op};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -649,14 +649,51 @@ fn message_text(m: &ChatMessage) -> Option<String> {
     Some(format!("{who}: {text}"))
 }
 
-/// Construit le prompt unique envoyé à `claude -p` (sortie attendue : UN objet JSON).
-fn build_cli_prompt(doc: &Document, messages: &[ChatMessage]) -> String {
+/// Texte brut d'un bloc (pour l'aperçu du focus), ou un libellé pour les blocs non textuels.
+fn node_plain_text(node: &Node) -> String {
+    match node {
+        Node::Paragraph { runs }
+        | Node::Heading { runs, .. }
+        | Node::ListItem { runs, .. }
+        | Node::Quote { runs } => runs.iter().map(|r| r.text.as_str()).collect(),
+        Node::CodeBlock { text, .. } => text.clone(),
+        Node::Table { .. } => "[tableau]".to_string(),
+        Node::Image { alt, .. } => format!("[image : {alt}]"),
+        Node::PageBreak => "[saut de page]".to_string(),
+    }
+}
+
+/// Indice de focus : « id=\"…\" (« aperçu… ») » si le bloc ciblé existe.
+fn focus_hint(doc: &Document, id: &str) -> Option<String> {
+    let block = doc.blocks.iter().find(|b| b.id.0.as_str() == id)?;
+    let text = node_plain_text(&block.node);
+    let preview: String = text.chars().take(120).collect();
+    let ell = if text.chars().count() > 120 {
+        "…"
+    } else {
+        ""
+    };
+    Some(format!("id=\"{id}\" (« {preview}{ell} »)"))
+}
+
+/// Construit le prompt unique envoyé à `claude -p`. `focus` = id de bloc ciblé
+/// par l'utilisateur (priorité), s'il y en a un.
+fn build_cli_prompt(doc: &Document, messages: &[ChatMessage], focus: Option<&str>) -> String {
     let doc_json = serde_json::to_string_pretty(doc).unwrap_or_default();
     let transcript = messages
         .iter()
         .filter_map(message_text)
         .collect::<Vec<_>>()
         .join("\n");
+    let focus_section = focus
+        .and_then(|id| focus_hint(doc, id))
+        .map(|h| {
+            format!(
+                "\n\nPRIORITÉ — l'utilisateur cible ce bloc : {h}\n\
+Concentre tes modifications sur ce bloc en priorité (sauf si la demande implique clairement d'autres blocs)."
+            )
+        })
+        .unwrap_or_default();
     format!(
         "Tu es l'assistant d'édition de Plume, un éditeur de documents. Tu modifies le document \
 UNIQUEMENT en émettant des opérations. Cible les blocs existants par leur `id` ; pour InsertBlock, \
@@ -666,7 +703,7 @@ Réponds EXACTEMENT dans cet ordre :\n\
 2) puis, sur une NOUVELLE ligne, un bloc de code ```json contenant {{\"ops\": [<op>, ...]}} \
 (liste vide si aucune édition). N'écris RIEN après ce bloc.\n\n\
 {OPS_HELP}\n\n\
-Document actuel (JSON) :\n{doc_json}\n\n\
+Document actuel (JSON) :\n{doc_json}{focus_section}\n\n\
 Conversation :\n{transcript}"
     )
 }
@@ -725,6 +762,7 @@ async fn run_cli_agent(
     mut messages: Vec<ChatMessage>,
     model: String,
     effort: String,
+    focus: Option<String>,
 ) -> Vec<ChatMessage> {
     let claude = match find_claude() {
         Some(p) => p,
@@ -741,7 +779,7 @@ async fn run_cli_agent(
         let s = state.lock().unwrap_or_else(|e| e.into_inner());
         s.doc.clone()
     };
-    let prompt = build_cli_prompt(&doc, &messages);
+    let prompt = build_cli_prompt(&doc, &messages, focus.as_deref());
 
     // Streaming : sortie NDJSON lue ligne par ligne. `claude -p` lit le prompt sur
     // stdin (évite les limites de longueur d'argument).
@@ -924,11 +962,12 @@ pub async fn chat_send(
     provider: String,
     model: String,
     effort: String,
+    focus: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, Shared>,
 ) -> Result<Vec<ChatMessage>, String> {
     if provider == "cli" {
-        return Ok(run_cli_agent(app, state.inner(), messages, model, effort).await);
+        return Ok(run_cli_agent(app, state.inner(), messages, model, effort, focus).await);
     }
     // Défaut : API Anthropic (clé).
     let api_key = match std::env::var("ANTHROPIC_API_KEY") {
@@ -1057,9 +1096,37 @@ mod tests {
 
     #[test]
     fn prompt_cli_contient_doc_et_consignes() {
-        let prompt = build_cli_prompt(&plume_core::Document::empty(), &[]);
+        let prompt = build_cli_prompt(&plume_core::Document::empty(), &[], None);
         assert!(prompt.contains("\"ops\""));
         assert!(prompt.contains("Document actuel"));
         assert!(prompt.contains("SetRuns"));
+        assert!(
+            !prompt.contains("PRIORITÉ"),
+            "pas de section focus sans cible"
+        );
+    }
+
+    #[test]
+    fn prompt_cli_focus_ajoute_la_priorite() {
+        use plume_core::{Block, Node, Run};
+        let mut doc = plume_core::Document::empty();
+        let block = Block::new(Node::Paragraph {
+            runs: vec![Run::plain("Cible ce paragraphe")],
+        });
+        let id = block.id.0.clone();
+        doc.blocks.push(block);
+        let prompt = build_cli_prompt(&doc, &[], Some(&id));
+        assert!(
+            prompt.contains("PRIORITÉ"),
+            "la section focus doit apparaître"
+        );
+        assert!(prompt.contains(&id), "l'id ciblé doit être mentionné");
+        assert!(
+            prompt.contains("Cible ce paragraphe"),
+            "aperçu du bloc ciblé"
+        );
+        // Un id inconnu n'ajoute pas de section (pas de plantage).
+        let p2 = build_cli_prompt(&doc, &[], Some("inconnu"));
+        assert!(!p2.contains("PRIORITÉ"));
     }
 }

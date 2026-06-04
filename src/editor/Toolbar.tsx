@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
 import { useEditor } from "./EditorContext";
 import {
+  insertTable,
   setBlockType,
   setColor,
   setLink,
+  targetActiveBlock,
   toggleBoolMark,
   type BlockKind,
   type BoolMark,
@@ -105,6 +107,18 @@ export function Toolbar() {
       ))}
       <Tool title="Retirer la couleur" onAction={() => setColor(editor, null)}>
         <span className="text-xs text-muted">✕</span>
+      </Tool>
+
+      <Separator />
+
+      <Tool title="Insérer un tableau" onAction={() => insertTable(editor)}>
+        ▦
+      </Tool>
+      <Tool
+        title="Cibler ce bloc pour l'assistant (contexte prioritaire)"
+        onAction={() => targetActiveBlock(editor)}
+      >
+        🎯
       </Tool>
     </div>
   );

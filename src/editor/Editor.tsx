@@ -63,6 +63,7 @@ export function Editor() {
   const [saving, setSaving] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [focusId, setFocusId] = useState<string | null>(null); // bloc ciblé pour l'assistant
   // Ouverture du chat : par défaut ouvert sur grand écran, fermé sur petit ;
   // mémorisé. Le document récupère la largeur quand le chat est fermé.
   const [chatOpen, setChatOpen] = useState(() => {
@@ -414,6 +415,13 @@ export function Editor() {
 
   const clearFocus = useCallback(() => setPendingFocus(null), []);
 
+  const setFocus = useCallback((id: string | null) => setFocusId(id), []);
+
+  // Le bloc ciblé disparaît (suppression) → on retire le focus prioritaire.
+  useEffect(() => {
+    if (focusId && doc && !doc.blocks.some((b) => b.id === focusId)) setFocusId(null);
+  }, [doc, focusId]);
+
   const toggleChat = useCallback(
     () =>
       setChatOpen((v) => {
@@ -435,6 +443,8 @@ export function Editor() {
     pendingFocus,
     requestFocus,
     clearFocus,
+    focusId,
+    setFocus,
   };
 
   const fileName = path ? path.split(/[\\/]/).pop() ?? path : "Brouillon";

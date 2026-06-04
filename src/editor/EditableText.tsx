@@ -184,7 +184,9 @@ export function EditableText({ block, runs, tag, className }: Props) {
     spellCheck: true,
     "data-block-id": block.id,
     "data-editable-block": block.id,
-    className: `${className} rounded-sm outline-none focus:bg-coral-soft`,
+    className: `${className} rounded-sm outline-none focus:bg-coral-soft ${
+      editor?.focusId === block.id ? "ring-2 ring-coral ring-offset-2 ring-offset-card" : ""
+    }`,
     onInput,
     onKeyDown,
     onFocus: () => {

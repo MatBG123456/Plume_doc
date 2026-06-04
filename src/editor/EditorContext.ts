@@ -24,6 +24,9 @@ export type EditorApi = {
   /** Demande que le bloc `id` prenne le focus au caret `offset` après rendu. */
   requestFocus: (id: string, offset: number) => void;
   clearFocus: () => void;
+  /** Bloc épinglé comme contexte PRIORITAIRE pour l'assistant (ou null). */
+  focusId: string | null;
+  setFocus: (id: string | null) => void;
 };
 
 export const EditorContext = createContext<EditorApi | null>(null);

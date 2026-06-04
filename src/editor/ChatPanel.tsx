@@ -1,7 +1,28 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { Node as DocNode } from "../bindings";
+import { useEditor } from "./EditorContext";
 import { Spark } from "../Spark";
+
+/** Texte court d'un bloc (pour l'aperçu du focus). */
+function blockText(node: DocNode): string {
+  switch (node.type) {
+    case "Paragraph":
+    case "Heading":
+    case "ListItem":
+    case "Quote":
+      return node.runs.map((r) => r.text).join("");
+    case "CodeBlock":
+      return node.text;
+    case "Table":
+      return "[tableau]";
+    case "Image":
+      return `[image : ${node.alt}]`;
+    case "PageBreak":
+      return "[saut de page]";
+  }
+}
 
 // Panneau de chat. Le provider est **toujours** « Claude Code (CLI local) » : on
 // délègue au binaire `claude` que l'utilisateur a installé/authentifié (son
@@ -98,6 +119,15 @@ export function ChatPanel() {
   const streamingRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  const editor = useEditor();
+  const focusId = editor?.focusId ?? null;
+  const doc = editor?.doc;
+  const focusPreview = useMemo(() => {
+    if (!focusId || !doc) return null;
+    const b = doc.blocks.find((x) => x.id === focusId);
+    return b ? blockText(b.node) : null;
+  }, [focusId, doc]);
+
   function resetLive() {
     streamingRef.current = "";
     setStreaming("");
@@ -158,6 +188,7 @@ export function ChatPanel() {
         provider: "cli",
         model,
         effort,
+        focus: focusId,
       });
       setMessages(updated);
     } catch {
@@ -227,6 +258,22 @@ export function ChatPanel() {
       </div>
 
       <div className="border-t border-line p-3">
+        {focusId && (
+          <div className="mb-2 flex items-center gap-1.5 rounded-row bg-coral-soft px-2 py-1 text-xs text-coral-ink">
+            <span aria-hidden="true">🎯</span>
+            <span className="truncate">
+              Focus : {focusPreview?.slice(0, 60) || "(bloc ciblé)"}
+            </span>
+            <button
+              type="button"
+              onClick={() => editor?.setFocus(null)}
+              title="Retirer le focus"
+              className="ml-auto rounded px-1 hover:bg-coral/20"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}

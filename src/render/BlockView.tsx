@@ -4,6 +4,7 @@ import { RunsView } from "./RunsView";
 import { ListGroup } from "./ListGroup";
 import { useEditor } from "../editor/EditorContext";
 import { EditableText } from "../editor/EditableText";
+import { EditableTable } from "../editor/EditableTable";
 
 // Dispatch d'un bloc vers son composant du design system. Le rendu des listes
 // (regroupement des `ListItem` consécutifs) appartient à `DocumentView` ; ici on
@@ -101,7 +102,9 @@ export function BlockView({ block }: { block: Block }): ReactNode {
       );
 
     case "Table":
-      return (
+      return editable ? (
+        <EditableTable block={block} node={node} />
+      ) : (
         <div data-block-id={anchor} className="my-4 overflow-x-auto">
           <table className="w-full border-collapse text-sm">
             <tbody>
