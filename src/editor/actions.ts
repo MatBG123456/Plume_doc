@@ -1,7 +1,7 @@
-import type { MarkPatch, Node as DocNode, Run } from "../bindings";
+import type { Marks, MarkPatch, Node as DocNode, Run } from "../bindings";
 import type { EditorApi } from "./EditorContext";
 import { getSelectionOffsets } from "./caret";
-import { reconcile, runsToChars } from "./text";
+import { charsToRuns, reconcile, runsToChars } from "./text";
 import { newTable } from "./tableOps";
 
 // Actions de la barre d'outils et des raccourcis clavier. Toutes opèrent sur la
@@ -51,8 +51,82 @@ function nodeRuns(node: DocNode): Run[] | null {
   }
 }
 
+// --- Cellules de tableau ----------------------------------------------------
+// Un `<td>` éditable n'a pas de `data-editable-block` et une table n'a pas de
+// runs au niveau bloc : les marques s'y appliquent en reconstruisant les runs de
+// la cellule (avec la marque sur la sélection) via une op `SetTableCell`.
+
+type Cell = { host: HTMLElement; id: string; row: number; col: number };
+
+/** Cellule de tableau éditable contenant la sélection, ou `null`. */
+function activeCell(): Cell | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const anchor = sel.anchorNode;
+  const el = anchor instanceof HTMLElement ? anchor : anchor?.parentElement;
+  const host = el?.closest<HTMLElement>("[data-editable-cell]") ?? null;
+  const id = host?.getAttribute("data-editable-cell");
+  const row = Number(host?.getAttribute("data-row"));
+  const col = Number(host?.getAttribute("data-col"));
+  if (!host || !id || Number.isNaN(row) || Number.isNaN(col)) return null;
+  return { host, id, row, col };
+}
+
+function cellRuns(editor: EditorApi, id: string, row: number, col: number): Run[] | null {
+  const block = editor.doc.blocks.find((b) => b.id === id);
+  if (!block || block.node.type !== "Table") return null;
+  return block.node.rows[row]?.[col]?.runs ?? null;
+}
+
+/** Texte vivant de la cellule (modèle réconcilié avec le DOM), en caractères. */
+function cellLiveChars(editor: EditorApi, cell: Cell) {
+  const runs = cellRuns(editor, cell.id, cell.row, cell.col);
+  if (!runs) return null;
+  return reconcile(runsToChars(runs), cell.host.textContent ?? "").chars;
+}
+
+/** Applique un patch de marques sur la sélection d'une cellule (dispatch SetTableCell). */
+function applyCellPatch(editor: EditorApi, cell: Cell, range: { a: number; b: number }, patch: MarkPatch): void {
+  const chars = cellLiveChars(editor, cell);
+  if (!chars) return;
+  const next = chars.map((c, i) => {
+    if (i < range.a || i >= range.b) return c;
+    const marks: Marks = { ...c.marks, ...patch };
+    return { ...c, marks };
+  });
+  editor.dispatch(
+    { op: "SetTableCell", id: cell.id, row: cell.row, col: cell.col, runs: charsToRuns(next) },
+    { sync: true },
+  );
+}
+
+/** Demande l'URL d'un lien : `string` = poser, `null` = retirer, `undefined` = annulé/invalide. */
+function promptLink(): string | null | undefined {
+  const url = window.prompt("URL du lien (laisser vide pour retirer) :", "https://");
+  if (url === null) return undefined; // annulé
+  const trimmed = url.trim();
+  const link = trimmed === "" ? null : trimmed;
+  // Évite un lien trivialement invalide (ex. « https:// » sans hôte) que Rust rejetterait.
+  if (link !== null && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/.+/.test(link)) return undefined;
+  return link;
+}
+
 /** Bascule une marque booléenne sur la sélection (toggle selon l'état courant). */
 export function toggleBoolMark(editor: EditorApi, mark: BoolMark): void {
+  const cell = activeCell();
+  if (cell) {
+    const range = activeRange(cell.host);
+    if (!range) return;
+    const chars = cellLiveChars(editor, cell);
+    if (!chars) return;
+    const sel = chars.slice(range.a, range.b);
+    const allSet = sel.length > 0 && sel.every((c) => c.marks[mark]);
+    const patch: MarkPatch = {};
+    patch[mark] = !allSet;
+    applyCellPatch(editor, cell, range, patch);
+    return;
+  }
+
   const active = activeHost();
   if (!active) return;
   const range = activeRange(active.host);
@@ -75,6 +149,12 @@ export function toggleBoolMark(editor: EditorApi, mark: BoolMark): void {
 
 /** Pose (`hex`) ou retire (`null`) une couleur sur la sélection. */
 export function setColor(editor: EditorApi, color: string | null): void {
+  const cell = activeCell();
+  if (cell) {
+    const range = activeRange(cell.host);
+    if (range) applyCellPatch(editor, cell, range, { color });
+    return;
+  }
   const active = activeHost();
   if (!active) return;
   const range = activeRange(active.host);
@@ -87,17 +167,21 @@ export function setColor(editor: EditorApi, color: string | null): void {
 
 /** Pose ou retire un lien sur la sélection (URL demandée à l'utilisateur). */
 export function setLink(editor: EditorApi): void {
+  const cell = activeCell();
+  if (cell) {
+    const range = activeRange(cell.host);
+    if (!range) return;
+    const link = promptLink();
+    if (link === undefined) return;
+    applyCellPatch(editor, cell, range, { link });
+    return;
+  }
   const active = activeHost();
   if (!active) return;
   const range = activeRange(active.host);
   if (!range) return;
-  const url = window.prompt("URL du lien (laisser vide pour retirer) :", "https://");
-  if (url === null) return; // annulé
-  const trimmed = url.trim();
-  const link = trimmed === "" ? null : trimmed;
-  // Évite d'envoyer un lien trivialement invalide (ex. « https:// » sans hôte),
-  // que Rust rejetterait ; on retire ou pose seulement une URL absolue plausible.
-  if (link !== null && !/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/.+/.test(link)) return;
+  const link = promptLink();
+  if (link === undefined) return;
   editor.dispatch(
     { op: "ApplyMark", id: active.id, range: [range.a, range.b], mark: { link } },
     { sync: true },

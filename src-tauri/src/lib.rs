@@ -28,6 +28,10 @@ pub(crate) struct EditorState {
     /// Bloc de la dernière saisie, pour coalescer une rafale de frappe en une
     /// seule étape d'undo (`None` après undo/redo/agent/ouverture).
     pub(crate) last_edit: Option<String>,
+    /// `true` pendant qu'un tour d'assistant applique des ops : `set_document`
+    /// (bascule d'onglet) est alors refusé pour ne pas muter le document sous les
+    /// pieds de l'agent (sinon ops appliquées au mauvais document / perdues).
+    pub(crate) agent_busy: bool,
 }
 
 impl EditorState {
@@ -37,6 +41,7 @@ impl EditorState {
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: None,
+            agent_busy: false,
         }
     }
 }

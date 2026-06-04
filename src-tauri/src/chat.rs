@@ -979,6 +979,18 @@ async fn run_cli_agent(
     messages
 }
 
+/// Pose `agent_busy=true` et le remet à `false` en sortie de portée — y compris
+/// en cas d'erreur ou de panique d'un tour d'agent (sinon `set_document` resterait
+/// bloqué indéfiniment et plus aucune bascule d'onglet ne serait possible).
+struct BusyGuard<'a>(&'a Shared);
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        let mut s = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        s.agent_busy = false;
+    }
+}
+
 /// Command : envoie l'historique au provider choisi (`api` = API Anthropic via
 /// clé ; `cli` = Claude Code local) et renvoie l'historique mis à jour.
 #[tauri::command]
@@ -992,30 +1004,29 @@ pub async fn chat_send(
     app: AppHandle,
     state: tauri::State<'_, Shared>,
 ) -> Result<Vec<ChatMessage>, String> {
+    let shared = state.inner();
+    // Verrou « tour en vol » : empêche `set_document` (bascule d'onglet) de muter
+    // le document pendant que l'agent applique ses ops.
+    {
+        let mut s = shared.lock().unwrap_or_else(|e| e.into_inner());
+        s.agent_busy = true;
+    }
+    let _busy = BusyGuard(shared);
+
     if provider == "cli" {
         let attachments = attachments.unwrap_or_default();
-        return Ok(run_cli_agent(
-            app,
-            state.inner(),
-            messages,
-            model,
-            effort,
-            focus,
-            attachments,
-        )
-        .await);
+        return Ok(run_cli_agent(app, shared, messages, model, effort, focus, attachments).await);
     }
     // Défaut : API Anthropic (clé).
-    let api_key = match std::env::var("ANTHROPIC_API_KEY") {
-        Ok(k) => k,
+    match std::env::var("ANTHROPIC_API_KEY") {
+        Ok(api_key) => Ok(run_agent(app, shared, messages, api_key).await),
         Err(_) => {
             let msg =
                 "ANTHROPIC_API_KEY manquante : définis-la, ou choisis « Claude Code ».".to_string();
             emit_error(&app, msg.clone());
-            return Err(msg);
+            Err(msg)
         }
-    };
-    Ok(run_agent(app, state.inner(), messages, api_key).await)
+    }
 }
 
 #[cfg(test)]
@@ -1183,5 +1194,17 @@ mod tests {
         // Un id inconnu n'ajoute pas de section (pas de plantage).
         let p2 = build_cli_prompt(&doc, &[], Some("inconnu"), &[]);
         assert!(!p2.contains("PRIORITÉ"));
+    }
+
+    #[test]
+    fn delta_text_formes_tolerees() {
+        // Flux partiel enveloppé (`stream_event`) ET delta nu : les deux formes.
+        let enveloppe = json!({ "event": { "delta": { "text": "Hé" } } });
+        assert_eq!(delta_text(&enveloppe), Some("Hé"));
+        let nu = json!({ "delta": { "text": "ok" } });
+        assert_eq!(delta_text(&nu), Some("ok"));
+        // Un event sans delta (ex. `result`) ne produit pas de texte.
+        let resultat = json!({ "type": "result", "result": "fini" });
+        assert_eq!(delta_text(&resultat), None);
     }
 }

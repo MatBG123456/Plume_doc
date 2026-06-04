@@ -12,14 +12,29 @@ use plume_core::Document;
 
 use crate::Shared;
 
-/// Sérialise un document en `.plume.json` (JSON indenté, lisible/diffable).
+/// Version du schéma écrite dans les fichiers `.plume.json`. À incrémenter lors
+/// d'un changement de modèle, en ajoutant la migration correspondante dans
+/// [`migrate`]. Le versionnement est porté **par le fichier** (clé
+/// `schema_version`), pas par le modèle : la désérialisation ignore les clés
+/// inconnues, donc aucun champ n'est ajouté à `Document`/`Meta`.
+pub(crate) const SCHEMA_VERSION: u64 = 1;
+
+/// Sérialise un document en `.plume.json` (JSON indenté, lisible/diffable),
+/// estampillé de la version de schéma courante.
 ///
 /// Écriture **atomique et durable** : on écrit dans un fichier temporaire (même
 /// dossier), on le `sync` sur disque, puis on `rename` (basculement atomique sur
 /// le même système de fichiers). Une écriture interrompue ne peut donc jamais
 /// laisser la cible tronquée : soit l'ancien contenu, soit le nouveau, intact.
 fn write_doc(doc: &Document, path: &str) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
+    let mut value = serde_json::to_value(doc).map_err(|e| e.to_string())?;
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "schema_version".to_string(),
+            serde_json::json!(SCHEMA_VERSION),
+        );
+    }
+    let json = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
     let tmp = format!("{path}.tmp");
     {
         let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
@@ -32,10 +47,31 @@ fn write_doc(doc: &Document, path: &str) -> Result<(), String> {
     })
 }
 
-/// Lit et désérialise un `.plume.json`.
+/// Lit, **migre** puis désérialise un `.plume.json`.
 fn read_doc(path: &str) -> Result<Document, String> {
     let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| format!("fichier .plume.json invalide : {e}"))
+    let mut value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("fichier .plume.json invalide : {e}"))?;
+    // Fichiers antérieurs au versionnement : pas de clé → v0 (même schéma que v1).
+    let version = value
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    migrate(&mut value, version)?;
+    serde_json::from_value(value).map_err(|e| format!("fichier .plume.json invalide : {e}"))
+}
+
+/// Migre la valeur JSON d'un document vers la version de schéma courante. Refuse
+/// une version plus récente que celle supportée par ce binaire.
+fn migrate(_value: &mut serde_json::Value, version: u64) -> Result<(), String> {
+    if version > SCHEMA_VERSION {
+        return Err(format!(
+            "fichier créé par une version plus récente de Plume (schéma v{version} > v{SCHEMA_VERSION}) : mets Plume à jour."
+        ));
+    }
+    // v0 (non versionné) et v1 partagent le même schéma : rien à migrer.
+    // Futures migrations : `if version < 2 { /* transformer value */ }` etc.
+    Ok(())
 }
 
 /// Enregistre le document **fourni** (snapshot capturé côté front) à `path`.
@@ -70,6 +106,10 @@ pub fn open_document(path: String, state: tauri::State<'_, Shared>) -> Result<Do
 #[tauri::command]
 pub fn set_document(doc: Document, state: tauri::State<'_, Shared>) -> Result<(), String> {
     let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
+    if s.agent_busy {
+        // Un tour d'assistant applique des ops : ne pas muter le document sous lui.
+        return Err("Un tour de l'assistant est en cours ; réessaie dans un instant.".into());
+    }
     s.doc = doc;
     s.undo.clear();
     s.redo.clear();
@@ -129,6 +169,51 @@ mod tests {
         let path = temp("plume_test_invalide.plume.json");
         fs::write(&path, "ceci n'est pas du json").unwrap();
         assert!(read_doc(&path).is_err());
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn schema_version_ecrite_et_ignoree_au_relire() {
+        let doc = Document::empty();
+        let path = temp("plume_test_schema.plume.json");
+        write_doc(&doc, &path).expect("écriture");
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("\"schema_version\""),
+            "le fichier porte la version"
+        );
+        assert_eq!(
+            read_doc(&path).expect("lecture"),
+            doc,
+            "la clé de version est ignorée"
+        );
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn fichier_non_versionne_se_lit() {
+        // Ancien format : Document brut, sans `schema_version`.
+        let doc = Document::empty();
+        let raw = serde_json::to_string_pretty(&doc).unwrap();
+        let path = temp("plume_test_legacy.plume.json");
+        fs::write(&path, raw).unwrap();
+        assert_eq!(read_doc(&path).expect("lecture legacy"), doc);
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn version_future_rejetee() {
+        let doc = Document::empty();
+        let mut v = serde_json::to_value(&doc).unwrap();
+        v.as_object_mut()
+            .unwrap()
+            .insert("schema_version".into(), serde_json::json!(999));
+        let path = temp("plume_test_future.plume.json");
+        fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+        assert!(
+            read_doc(&path).is_err(),
+            "une version future doit être refusée"
+        );
         let _ = fs::remove_file(&path);
     }
 }

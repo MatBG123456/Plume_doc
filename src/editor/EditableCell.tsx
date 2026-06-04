@@ -5,6 +5,7 @@ import { useEditor } from "./EditorContext";
 import { getSelectionOffsets, setSelection } from "./caret";
 import { runsToHtml } from "./html";
 import { charsToRuns, reconcile, runsToChars } from "./text";
+import { toggleBoolMark } from "./actions";
 
 // Cellule de tableau éditable. Même principe que `EditableText` (DOM rempli
 // depuis le modèle, frappe laissée au navigateur puis reconvertie en op) mais la
@@ -47,7 +48,20 @@ export function EditableCell({ blockId, row, col, runs }: Props) {
   }
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLTableCellElement>) {
-    if (e.key === "Enter") e.preventDefault(); // cellule mono-ligne
+    if (e.key === "Enter") {
+      e.preventDefault(); // cellule mono-ligne
+      return;
+    }
+    // Gras/italique/souligné au clavier (sinon le navigateur applique son propre
+    // formatage via execCommand, qui corromprait le DOM de la cellule).
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey && editor) {
+      const k = e.key.toLowerCase();
+      if (k === "b" || k === "i" || k === "u") {
+        e.preventDefault();
+        toggleBoolMark(editor, k === "b" ? "bold" : k === "i" ? "italic" : "underline");
+      }
+    }
   }
 
   return (
