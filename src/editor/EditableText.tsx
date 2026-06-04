@@ -174,6 +174,25 @@ export function EditableText({ block, runs, tag, className }: Props) {
       }
     }
 
+    // Tab / Maj+Tab sur un item de liste : indente / désindente (niveau 0..5).
+    if (e.key === "Tab" && block.node.type === "ListItem") {
+      e.preventDefault();
+      const node = block.node;
+      const level = Math.max(0, Math.min(5, node.level + (e.shiftKey ? -1 : 1)));
+      if (level !== node.level) {
+        const live = reconcile(runsToChars(runs), el.textContent ?? "").chars;
+        editor.dispatch(
+          {
+            op: "SetNode",
+            id: block.id,
+            node: { type: "ListItem", ordered: node.ordered, level, runs: charsToRuns(live) },
+          },
+          { sync: true },
+        );
+      }
+      return;
+    }
+
     if (e.key === "Enter") {
       e.preventDefault();
       handleEnter(el);

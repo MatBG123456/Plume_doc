@@ -48,6 +48,34 @@ export function EditableCell({ blockId, row, col, runs }: Props) {
   }
 
   function onKeyDown(e: ReactKeyboardEvent<HTMLTableCellElement>) {
+    // Tab / Maj+Tab : déplace le focus vers la cellule suivante / précédente.
+    if (e.key === "Tab") {
+      e.preventDefault();
+      if (!editor) return;
+      const table = editor.doc.blocks.find((b) => b.id === blockId);
+      if (!table || table.node.type !== "Table") return;
+      const rows = table.node.rows;
+      const cols = rows[0]?.length ?? 0;
+      let r = row;
+      let c = col;
+      if (e.shiftKey) {
+        if (c > 0) c -= 1;
+        else if (r > 0) {
+          r -= 1;
+          c = cols - 1;
+        } else return;
+      } else if (c < cols - 1) {
+        c += 1;
+      } else if (r < rows.length - 1) {
+        r += 1;
+        c = 0;
+      } else return;
+      const target = document.querySelector<HTMLElement>(
+        `[data-editable-cell="${CSS.escape(blockId)}"][data-row="${r}"][data-col="${c}"]`,
+      );
+      target?.focus();
+      return;
+    }
     if (e.key === "Enter") {
       e.preventDefault(); // cellule mono-ligne
       return;
