@@ -156,3 +156,25 @@ export const ChevronDown = (p: P) => (
     <path d="m6 9 6 6 6-6" />
   </Svg>
 );
+
+export const Image = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <circle cx="9" cy="9" r="2" />
+    <path d="m21 15-5-5L5 21" />
+  </Svg>
+);
+
+export const Pencil = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 20h9" />
+    <path d="m16.5 3.5 4 4L7 21l-4 1 1-4z" />
+  </Svg>
+);
+
+export const Replace = (p: P) => (
+  <Svg {...p}>
+    <path d="M14 4h6v6M20 4l-7 7" />
+    <path d="M10 20H4v-6M4 20l7-7" />
+  </Svg>
+);

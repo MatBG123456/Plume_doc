@@ -249,3 +249,41 @@ export function insertTable(editor: EditorApi, rows = 2, cols = 2): void {
     { sync: true },
   );
 }
+
+type ImageFields = { src: string; alt: string; width_pct: number | null };
+
+/** Demande les champs d'une image (URL absolue ou data:), ou `null` si annulé/invalide. */
+function promptImage(initial?: ImageFields): ImageFields | null {
+  const src = window.prompt("URL de l'image (https://… ou data:) :", initial?.src ?? "https://");
+  if (src === null) return null;
+  const url = src.trim();
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/.+/.test(url) && !url.startsWith("data:")) return null;
+  const alt = (window.prompt("Texte alternatif (description) :", initial?.alt ?? "") ?? "").trim();
+  const def = initial?.width_pct != null ? String(initial.width_pct) : "";
+  const w = parseInt((window.prompt("Largeur en % (1–100, vide = auto) :", def) ?? "").trim(), 10);
+  const width_pct = Number.isFinite(w) && w >= 1 && w <= 100 ? w : null;
+  return { src: url, alt, width_pct };
+}
+
+/** Insère une image après le bloc courant (sinon à la fin). */
+export function insertImage(editor: EditorApi): void {
+  const img = promptImage();
+  if (!img) return;
+  const active = activeHost();
+  const blocks = editor.doc.blocks;
+  const idx = active ? blocks.findIndex((b) => b.id === active.id) : -1;
+  const at = idx < 0 ? blocks.length : idx + 1;
+  editor.dispatch(
+    { op: "InsertBlock", at, block: { id: makeId(), node: { type: "Image", ...img } } },
+    { sync: true },
+  );
+}
+
+/** Modifie une image existante (URL / alt / largeur) via `SetNode`. */
+export function editImage(editor: EditorApi, id: string): void {
+  const block = editor.doc.blocks.find((b) => b.id === id);
+  if (!block || block.node.type !== "Image") return;
+  const img = promptImage({ src: block.node.src, alt: block.node.alt, width_pct: block.node.width_pct });
+  if (!img) return;
+  editor.dispatch({ op: "SetNode", id, node: { type: "Image", ...img } }, { sync: true });
+}

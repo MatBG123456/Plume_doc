@@ -84,7 +84,9 @@ Plume_doc/
 │
 ├── src/                       # Front React + Vite + TS + Tailwind
 │   ├── main.tsx
-│   ├── App.tsx                # monte l'éditeur (W4) + smoke-test ping (W0)
+│   ├── App.tsx                # monte le gestionnaire d'onglets (TabManager) + thème clair/sombre + mascotte
+│   ├── icons.tsx             # jeu d'icônes SVG inline (style « Perch »)
+│   ├── Spark.tsx             # mascotte (astérisque à 8 rais)
 │   ├── bindings/             # types TS générés par ts-rs (NE PAS éditer)
 │   ├── render/               # Wave 3 : renderer (blocks → DS) ; éditable en W4
 │   │   ├── DocumentView.tsx  #   page « feuille » + segmentation listes/blocs
@@ -93,23 +95,26 @@ Plume_doc/
 │   │   ├── RunsView.tsx      #   Run[] → spans (lecture seule)
 │   │   ├── marks.ts          #   mapping Marks → styles (partagé rendu/édition)
 │   │   └── fixture.ts        #   document de démo (fallback hors Tauri)
-│   ├── editor/               # W4 édition · W5 chat · W6 fichier · W7 export · W8 polish
+│   ├── editor/               # édition · multi-onglets · chat · fichier · export · polish
+│   │   ├── TabManager.tsx    #   multi-onglets (snapshots, cache de session, fermeture)
 │   │   ├── Editor.tsx        #   doc Rust, file de dispatch, fichier/autosave, undo/redo, raccourcis
 │   │   ├── EditableText.tsx  #   hôte contentEditable → SetRuns/InsertBlock/…
-│   │   ├── Toolbar.tsx       #   type de bloc, marques, lien, couleurs
-│   │   ├── actions.ts        #   ApplyMark / SetNode sur la sélection
+│   │   ├── EditableTable.tsx · EditableCell.tsx · tableOps.ts  # tableaux éditables (SetTableCell/SetNode)
+│   │   ├── Toolbar.tsx       #   type de bloc, marques, lien, couleurs, tableau, image, cible
+│   │   ├── actions.ts        #   ApplyMark / SetNode / SetTableCell sur la sélection (blocs + cellules)
 │   │   ├── text.ts           #   réconciliation texte ⇄ runs (pure, testée)
 │   │   ├── caret.ts          #   sélection DOM ⇄ offsets code points
-│   │   ├── ChatPanel.tsx     #   Wave 5 : panneau chat (streaming → chat_send)
-│   │   ├── CommandPalette.tsx #  Wave 8 : palette de commandes (Ctrl+K)
-│   │   └── SearchBar.tsx     #   Wave 8 : recherche dans le document (Ctrl+F)
+│   │   ├── ChatPanel.tsx     #   panneau chat (Claude Code local, streaming, contexte)
+│   │   ├── CommandPalette.tsx #  palette de commandes (Ctrl+K)
+│   │   └── SearchBar.tsx     #   recherche + remplacement dans le document (Ctrl+F)
 │   └── styles.css
 │
 ├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
 │   ├── src/lib.rs             # commands : ping, get_document, apply_op, undo, redo, save/open, export
-│   ├── src/chat.rs            # Wave 5 : boucle agent (Anthropic streaming + 8 outils)
-│   ├── src/persist.rs         # Wave 6 : open/save .plume.json (écriture atomique)
-│   ├── src/export.rs          # Wave 7 : export Markdown + .docx (docx-rs)
+│   ├── src/chat.rs            # boucle agent (Claude Code CLI / Anthropic) + 8 outils
+│   ├── src/persist.rs         # open/save .plume.json (atomique) + schema_version + set_document
+│   ├── src/import.rs          # import Markdown (pulldown-cmark) + .docx (zip + quick-xml)
+│   ├── src/export.rs          # export Markdown + .docx (docx-rs, styles Word)
 │   ├── src/main.rs
 │   ├── tauri.conf.json
 │   ├── capabilities/default.json
@@ -225,14 +230,15 @@ Implémentée dans la command Tauri `chat_send` :
 
 ## Export / Import
 
-- **Markdown** ⇄ natif : quasi iso-morphisme du modèle.
-- **`.docx`** : via `docx-rs` (mapper `Node` → éléments OOXML).
-- **PDF** : rendu webview → `tauri` print-to-pdf (ou sidecar `typst` / `weasyprint` pour une pagination fine).
-- **Import `.docx`** (v2) : `docx-rs` en lecture → reconstruction du modèle.
+- **Export Markdown** : mapping pur du modèle (`to_markdown`).
+- **Export `.docx`** : via `docx-rs`, avec de **vrais styles Word** (Title, Heading 1–6 → volet Navigation / table des matières).
+- **Export PDF** : impression du webview (réutilise le renderer ; CSS `print:`).
+- **Import Markdown / `.docx`** *(livré)* : `pulldown-cmark` pour le MD (titres, listes imbriquées, code, tableaux, marques) ; `.docx` lu via `zip` + `quick-xml` (best-effort). Disponible via **Importer**, en **glisser-déposer** sur la fenêtre, et comme **pièce de contexte** du chat (`import.rs`).
+- **Import PDF** : *reporté* (extracteur lourd, texte peu structuré).
 
 ## Démarrage
 
-Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Depuis la **Wave 5**, un panneau de chat (`chat_send`) pilote l'édition via Claude : l'API Anthropic est appelée **côté Rust** en streaming, chaque `tool_use` (8 outils = 8 ops) est validé puis appliqué par le **même** pipeline, avec preview live. Le chat propose **deux fournisseurs** (sélecteur dans le panneau) : **clé API** (`ANTHROPIC_API_KEY`, cf. ci-dessous — défaut) ou **Claude Code local** (`provider = "cli"`) qui délègue au binaire `claude` que l'utilisateur a lui-même installé et authentifié. ⚠️ Ce second mode passe par l'auth/abonnement de l'utilisateur : router des requêtes via un abonnement est encadré par les [CGU d'Anthropic](https://www.anthropic.com/legal) (plutôt usage interactif) — à chacun de vérifier la conformité de son usage ; il est optionnel et désactivé par défaut. Depuis la **Wave 6**, on ouvre/enregistre des `.plume.json` (sélecteur natif, écriture atomique côté Rust) avec **autosave** débouncé et flush à la fermeture (Ctrl/Cmd+S / +O). Depuis la **Wave 7**, on exporte en **Markdown** et **`.docx`** (mapping Rust) et en **PDF** (impression du webview, qui réutilise le renderer). La **Wave 8** ajoute le polish : undo/redo (Ctrl+Z/Y, avec coalescing de la frappe en une étape), palette de commandes (Ctrl+K) et recherche dans le document (Ctrl+F). Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
+Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Depuis la **Wave 5**, un panneau de chat (`chat_send`) pilote l'édition via Claude : l'API Anthropic est appelée **côté Rust** en streaming, chaque `tool_use` (8 outils = 8 ops) est validé puis appliqué par le **même** pipeline, avec preview live. Le chat passe **exclusivement par Claude Code local** : il délègue au binaire `claude` que l'utilisateur a lui-même installé et authentifié — **pas de clé API ni de sélecteur de fournisseur** dans l'UI (on choisit seulement **modèle** et **effort**, et on peut fournir des **documents en contexte**). ⚠️ Ce mode utilise l'auth/abonnement de l'utilisateur : router des requêtes via un abonnement est encadré par les [CGU d'Anthropic](https://www.anthropic.com/legal) (plutôt usage interactif) — à chacun de vérifier la conformité de son usage. *(Le code conserve une voie API Anthropic, mais elle n'est pas exposée dans l'interface.)* Depuis la **Wave 6**, on ouvre/enregistre des `.plume.json` (sélecteur natif, écriture atomique côté Rust) avec **autosave** débouncé et flush à la fermeture (Ctrl/Cmd+S / +O). Depuis la **Wave 7**, on exporte en **Markdown** et **`.docx`** (mapping Rust) et en **PDF** (impression du webview, qui réutilise le renderer). La **Wave 8** ajoute le polish : undo/redo (Ctrl+Z/Y, avec coalescing de la frappe en une étape), palette de commandes (Ctrl+K) et recherche dans le document (Ctrl+F). Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
 
 ### Prérequis
 
@@ -249,16 +255,17 @@ npm install            # dépendances front + CLI Tauri
 npm run dev            # front seul (Vite, http://localhost:1420)
 npm run tauri dev      # app complète (fenêtre Tauri + cœur Rust)
 
-# Variable requise pour la boucle agent (Wave 5+)
-export ANTHROPIC_API_KEY="sk-ant-..."
+# Le chat délègue au binaire « claude » (Claude Code) que tu installes toi-même
+# et authentifies ; choisis ensuite modèle/effort dans le panneau. Pas de clé API.
 ```
 
 ### Tests & qualité
 
 ```bash
-cargo test -p plume-core            # tests du cœur (ping + à venir : ops)
+cargo test                          # tous les tests Rust (cœur, ops, persistance, import)
+npm test                            # tests front (vitest : réconciliation de frappe, tableaux)
 cargo fmt --all                     # format Rust
-cargo clippy -p plume-core -- -D warnings
+cargo clippy --all -- -D warnings
 npm run build                       # tsc + build Vite de production
 ```
 
@@ -277,6 +284,17 @@ npm run build                       # tsc + build Vite de production
 | ✅ **W6** | Persistance `.plume.json` : open / save / **autosave** (I/O Rust atomique, sélecteur natif, flush à la fermeture) | fermer/rouvrir conserve tout |
 | ✅ **W7** | Export **Markdown** + **`.docx`** (mapping Rust) + **PDF** (impression du webview, CSS `print:`) | les 3 exports ouvrent sans corruption |
 | ✅ **W8** | Polish : undo/redo UI (Cmd+Z, **coalescing** de la frappe), palette de commandes (Ctrl+K), recherche (Ctrl+F), raccourcis | undo multi-niveaux fiable |
+
+### Au-delà de la feuille de route (livré)
+
+- **Chat = Claude Code local uniquement** (binaire `claude`), avec **modèle/effort**, **streaming**, **documents en contexte** + **fenêtre de contexte** (rafraîchir). Pas de clé API ni de sélecteur.
+- **Multi-onglets** (`TabManager`) : un document par onglet, cache de session, garde-fou de fermeture, **verrou agent** (pas de bascule pendant un tour d'assistant).
+- **Tableaux éditables** (cellules, +/− lignes & colonnes), **marques dans les cellules**, **insertion/édition d'image**.
+- **Import** Markdown + `.docx`, en menu / **glisser-déposer** / pièce de contexte du chat.
+- **Recherche → remplacer** (Tout remplacer).
+- **Focus de sélection** pour orienter l'assistant ; **mode sombre** ; **responsive** ; **icônes** & mascotte (DS « Perch »).
+- **Versionnement du format** (`schema_version`, refus d'une version plus récente).
+- **Tests** : `cargo` (cœur, ops, persistance, import) + `vitest` (réconciliation de frappe, tableaux).
 
 ## Conventions de développement
 

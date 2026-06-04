@@ -5,7 +5,7 @@ import { useEditor } from "./EditorContext";
 import { getSelectionOffsets, setSelection } from "./caret";
 import { runsToHtml } from "./html";
 import { charsToRuns, reconcile, runsToChars } from "./text";
-import { toggleBoolMark } from "./actions";
+import { toggleBoolMark, type BoolMark } from "./actions";
 
 // Cellule de tableau éditable. Même principe que `EditableText` (DOM rempli
 // depuis le modèle, frappe laissée au navigateur puis reconvertie en op) mais la
@@ -57,9 +57,19 @@ export function EditableCell({ blockId, row, col, runs }: Props) {
     const mod = e.ctrlKey || e.metaKey;
     if (mod && !e.altKey && editor) {
       const k = e.key.toLowerCase();
-      if (k === "b" || k === "i" || k === "u") {
+      if (k === "b" || k === "i" || k === "u" || k === "e" || (k === "x" && e.shiftKey)) {
         e.preventDefault();
-        toggleBoolMark(editor, k === "b" ? "bold" : k === "i" ? "italic" : "underline");
+        const m: BoolMark =
+          k === "b"
+            ? "bold"
+            : k === "i"
+              ? "italic"
+              : k === "u"
+                ? "underline"
+                : k === "e"
+                  ? "code"
+                  : "strike";
+        toggleBoolMark(editor, m);
       }
     }
   }

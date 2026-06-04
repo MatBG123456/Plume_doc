@@ -464,6 +464,13 @@ export function Editor({
     if (focusId && doc && !doc.blocks.some((b) => b.id === focusId)) setFocusId(null);
   }, [doc, focusId]);
 
+  // Auto-fermeture du toast d'erreur (sinon il reste indéfiniment à l'écran).
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(""), 6000);
+    return () => clearTimeout(t);
+  }, [error]);
+
   const toggleChat = useCallback(
     () =>
       setChatOpen((v) => {
@@ -648,8 +655,16 @@ export function Editor({
       )}
 
       {error && (
-        <div className="fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-pill bg-deny px-4 py-2 text-sm text-white shadow-soft print:hidden">
-          {error}
+        <div className="fixed bottom-4 left-1/2 z-40 flex max-w-[90vw] -translate-x-1/2 items-center gap-2 rounded-pill bg-deny px-4 py-2 text-sm text-white shadow-pop print:hidden">
+          <span className="truncate">{error}</span>
+          <button
+            type="button"
+            onClick={() => setError("")}
+            title="Fermer"
+            className="shrink-0 rounded p-0.5 hover:bg-white/20"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 

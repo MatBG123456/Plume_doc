@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { useEditor } from "./EditorContext";
-import { Link as LinkIcon, TableIcon, Target, X } from "../icons";
+import { Image as ImageIcon, Link as LinkIcon, TableIcon, Target, X } from "../icons";
 import {
+  insertImage,
   insertTable,
   setBlockType,
   setColor,
@@ -114,6 +115,9 @@ export function Toolbar() {
 
       <Tool title="Insérer un tableau" onAction={() => insertTable(editor)}>
         <TableIcon className="h-4 w-4" />
+      </Tool>
+      <Tool title="Insérer une image" onAction={() => insertImage(editor)}>
+        <ImageIcon className="h-4 w-4" />
       </Tool>
       <Tool
         title="Cibler ce bloc pour l'assistant (contexte prioritaire)"

@@ -5,7 +5,7 @@ import { useEditor } from "./EditorContext";
 import { getSelectionOffsets, setCaret, setSelection } from "./caret";
 import { runsToHtml } from "./html";
 import { charsToRuns, reconcile, runsToChars } from "./text";
-import { toggleBoolMark } from "./actions";
+import { toggleBoolMark, type BoolMark } from "./actions";
 
 // Surface éditable d'un bloc textuel. Principe : le DOM est rempli **depuis le
 // modèle** (innerHTML) ; la frappe est laissée au navigateur (non contrôlée,
@@ -156,9 +156,20 @@ export function EditableText({ block, runs, tag, className }: Props) {
     const mod = e.ctrlKey || e.metaKey;
     if (mod && !e.altKey) {
       const k = e.key.toLowerCase();
-      if (k === "b" || k === "i" || k === "u") {
+      // gras/italique/souligné, code (Ctrl+E), barré (Ctrl+Maj+X)
+      if (k === "b" || k === "i" || k === "u" || k === "e" || (k === "x" && e.shiftKey)) {
         e.preventDefault();
-        toggleBoolMark(editor, k === "b" ? "bold" : k === "i" ? "italic" : "underline");
+        const m: BoolMark =
+          k === "b"
+            ? "bold"
+            : k === "i"
+              ? "italic"
+              : k === "u"
+                ? "underline"
+                : k === "e"
+                  ? "code"
+                  : "strike";
+        toggleBoolMark(editor, m);
         return;
       }
     }
