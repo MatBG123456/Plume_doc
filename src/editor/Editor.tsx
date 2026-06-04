@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Document, Op } from "../bindings";
 import { DocumentView } from "../render/DocumentView";
 import { fixtureDoc } from "../render/fixture";
@@ -13,6 +14,7 @@ import { ChatPanel } from "./ChatPanel";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { SearchBar } from "./SearchBar";
 import { Spark } from "../Spark";
+import { Download, FileDown, FolderOpen, Redo, Save, Search, Undo, X } from "../icons";
 
 // Racine de l'éditeur. Le document vit côté Rust (source de vérité) : on le
 // charge au montage, et chaque édition est une `Op` envoyée à `apply_op`. La
@@ -67,6 +69,7 @@ export function Editor() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null); // bloc ciblé pour l'assistant
+  const [dragOver, setDragOver] = useState(false); // survol d'un fichier glissé
   // Ouverture du chat : par défaut ouvert sur grand écran, fermé sur petit ;
   // mémorisé. Le document récupère la largeur quand le chat est fermé.
   const [chatOpen, setChatOpen] = useState(() => {
@@ -242,6 +245,60 @@ export function Editor() {
       setError(String(e));
     }
   }, []);
+
+  // Import d'un fichier déposé (drag & drop) : même flux qu'`importFile`, le
+  // chemin venant du dépôt. On filtre l'extension avant d'appeler Rust.
+  const importDropped = useCallback(async (path: string) => {
+    if (!/\.(md|markdown|txt|docx)$/i.test(path)) {
+      setError("Glisser-déposer : formats acceptés — md, txt, docx.");
+      return;
+    }
+    if (dirtyRef.current) {
+      const ok = window.confirm("Des modifications non enregistrées seront perdues. Importer le fichier déposé ?");
+      if (!ok) return;
+    }
+    try {
+      const loaded = await invoke<Document>("import_document", { path });
+      rev.current += 1;
+      setDoc(loaded);
+      setSyncSignal((n) => n + 1);
+      setPath(null);
+      setDirty(true);
+      setError("");
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  // Glisser-déposer un fichier sur la fenêtre pour l'importer (md/txt/docx).
+  useEffect(() => {
+    if (!editable) return;
+    let un: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const u = await getCurrentWebview().onDragDropEvent((e) => {
+          if (e.payload.type === "drop") {
+            setDragOver(false);
+            const p = e.payload.paths[0];
+            if (p) void importDropped(p);
+          } else if (e.payload.type === "leave") {
+            setDragOver(false);
+          } else {
+            setDragOver(true); // enter / over
+          }
+        });
+        if (cancelled) u();
+        else un = u;
+      } catch {
+        // API indisponible (env) → pas de drag&drop, sans erreur.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      un?.();
+    };
+  }, [editable, importDropped]);
 
   // Undo/redo : la machinerie (piles d'inverses) vit côté Rust ; ici on rejoue
   // et on resynchronise tout le rendu (le document change structurellement).
@@ -498,21 +555,45 @@ export function Editor() {
           {editable && (
             <div className="sticky top-[49px] z-10 bg-paper/95 backdrop-blur print:hidden">
               <div className="flex flex-wrap items-center gap-1 border-b border-line px-3 py-1.5 sm:px-4">
-                <FileButton onClick={() => void openFile()}>Ouvrir</FileButton>
-                <FileButton onClick={() => void importFile()}>Importer</FileButton>
-                <FileButton onClick={saveCurrent}>Enregistrer</FileButton>
+                <FileButton onClick={() => void openFile()}>
+                  <span className="inline-flex items-center gap-1">
+                    <FolderOpen className="h-3.5 w-3.5" /> Ouvrir
+                  </span>
+                </FileButton>
+                <FileButton onClick={() => void importFile()}>
+                  <span className="inline-flex items-center gap-1">
+                    <FileDown className="h-3.5 w-3.5" /> Importer
+                  </span>
+                </FileButton>
+                <FileButton onClick={saveCurrent}>
+                  <span className="inline-flex items-center gap-1">
+                    <Save className="h-3.5 w-3.5" /> Enregistrer
+                  </span>
+                </FileButton>
                 <FileButton onClick={() => void saveAsFile()}>Enregistrer sous…</FileButton>
                 <span className="mx-1 h-5 w-px bg-line" />
                 <FileButton onClick={() => void undo()} title="Annuler (Ctrl+Z)">
-                  ↶
+                  <Undo className="h-4 w-4" />
                 </FileButton>
                 <FileButton onClick={() => void redo()} title="Rétablir (Ctrl+Maj+Z)">
-                  ↷
+                  <Redo className="h-4 w-4" />
                 </FileButton>
                 <span className="mx-1 h-5 w-px bg-line" />
-                <FileButton onClick={() => void exportMarkdown()}>↧ Markdown</FileButton>
-                <FileButton onClick={() => void exportDocx()}>↧ Word</FileButton>
-                <FileButton onClick={exportPdf}>↧ PDF</FileButton>
+                <FileButton onClick={() => void exportMarkdown()}>
+                  <span className="inline-flex items-center gap-1">
+                    <Download className="h-3.5 w-3.5" /> Markdown
+                  </span>
+                </FileButton>
+                <FileButton onClick={() => void exportDocx()}>
+                  <span className="inline-flex items-center gap-1">
+                    <Download className="h-3.5 w-3.5" /> Word
+                  </span>
+                </FileButton>
+                <FileButton onClick={exportPdf}>
+                  <span className="inline-flex items-center gap-1">
+                    <Download className="h-3.5 w-3.5" /> PDF
+                  </span>
+                </FileButton>
                 <span className="mx-1 h-5 w-px bg-line" />
                 <button
                   type="button"
@@ -521,9 +602,9 @@ export function Editor() {
                     e.preventDefault(); // garde le focus de l'éditable
                     openSearch();
                   }}
-                  className="rounded-md px-2 py-1 text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
+                  className="rounded-md px-2 py-1 text-muted hover:bg-coral-soft hover:text-coral-ink"
                 >
-                  🔍
+                  <Search className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
@@ -588,7 +669,7 @@ export function Editor() {
             className="fixed bottom-4 right-4 z-40 flex items-center gap-1.5 rounded-pill bg-coral px-4 py-2.5 text-sm font-medium text-white shadow-pop lg:hidden print:hidden"
           >
             {chatOpen ? (
-              "✕"
+              <X className="h-4 w-4" />
             ) : (
               <>
                 <Spark className="h-4 w-4" /> Assistant
@@ -596,6 +677,15 @@ export function Editor() {
             )}
           </button>
         </>
+      )}
+
+      {/* Glisser-déposer : voile + invite pendant le survol d'un fichier. */}
+      {dragOver && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-ink/20 print:hidden">
+          <div className="rounded-panel border-2 border-dashed border-coral bg-paper px-6 py-4 text-sm font-medium text-coral-ink shadow-pop">
+            Déposez un fichier (md, txt, docx) pour l'importer
+          </div>
+        </div>
       )}
 
       {error && (

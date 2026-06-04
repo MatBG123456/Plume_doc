@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Block } from "../bindings";
 import { useEditor } from "./EditorContext";
 import { EditableCell } from "./EditableCell";
+import { Minus, Plus, Trash } from "../icons";
 import {
   withColAdded,
   withColRemoved,
@@ -32,7 +33,7 @@ function CtrlBtn({
         e.preventDefault(); // ne pas voler le focus de la cellule
         onClick();
       }}
-      className={`rounded-md px-2 py-0.5 text-xs ${
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${
         danger
           ? "text-deny hover:bg-deny/10"
           : "text-muted hover:bg-coral-soft hover:text-coral-ink"
@@ -69,14 +70,22 @@ export function EditableTable({ block, node }: { block: Block; node: TableNode }
         </table>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-0.5 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 print:hidden">
-        <CtrlBtn onClick={() => apply(withRowAdded(node))}>+ ligne</CtrlBtn>
-        <CtrlBtn onClick={() => apply(withRowRemoved(node))}>− ligne</CtrlBtn>
+        <CtrlBtn onClick={() => apply(withRowAdded(node))}>
+          <Plus className="h-3 w-3" /> ligne
+        </CtrlBtn>
+        <CtrlBtn onClick={() => apply(withRowRemoved(node))}>
+          <Minus className="h-3 w-3" /> ligne
+        </CtrlBtn>
         <span className="mx-0.5 h-4 w-px bg-line" />
-        <CtrlBtn onClick={() => apply(withColAdded(node))}>+ colonne</CtrlBtn>
-        <CtrlBtn onClick={() => apply(withColRemoved(node))}>− colonne</CtrlBtn>
+        <CtrlBtn onClick={() => apply(withColAdded(node))}>
+          <Plus className="h-3 w-3" /> colonne
+        </CtrlBtn>
+        <CtrlBtn onClick={() => apply(withColRemoved(node))}>
+          <Minus className="h-3 w-3" /> colonne
+        </CtrlBtn>
         <span className="mx-0.5 h-4 w-px bg-line" />
         <CtrlBtn onClick={() => editor.dispatch({ op: "DeleteBlock", id }, { sync: true })} danger>
-          🗑 Supprimer
+          <Trash className="h-3 w-3" /> Supprimer
         </CtrlBtn>
       </div>
     </div>

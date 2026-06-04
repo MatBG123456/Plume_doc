@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useEditor } from "./EditorContext";
+import { Link as LinkIcon, TableIcon, Target, X } from "../icons";
 import {
   insertTable,
   setBlockType,
@@ -87,7 +88,7 @@ export function Toolbar() {
       <Separator />
 
       <Tool title="Lien" onAction={() => setLink(editor)}>
-        🔗
+        <LinkIcon className="h-4 w-4" />
       </Tool>
 
       <Separator />
@@ -106,19 +107,19 @@ export function Toolbar() {
         />
       ))}
       <Tool title="Retirer la couleur" onAction={() => setColor(editor, null)}>
-        <span className="text-xs text-muted">✕</span>
+        <X className="h-3.5 w-3.5" />
       </Tool>
 
       <Separator />
 
       <Tool title="Insérer un tableau" onAction={() => insertTable(editor)}>
-        ▦
+        <TableIcon className="h-4 w-4" />
       </Tool>
       <Tool
         title="Cibler ce bloc pour l'assistant (contexte prioritaire)"
         onAction={() => targetActiveBlock(editor)}
       >
-        🎯
+        <Target className="h-4 w-4" />
       </Tool>
     </div>
   );

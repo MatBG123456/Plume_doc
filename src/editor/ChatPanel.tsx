@@ -5,6 +5,9 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Node as DocNode } from "../bindings";
 import { useEditor } from "./EditorContext";
 import { Spark } from "../Spark";
+import { ChevronDown, Paperclip, RefreshCw, Send, Target, X } from "../icons";
+
+type Attached = { name: string; text: string; path: string };
 
 /** Texte court d'un bloc (pour l'aperçu du focus). */
 function blockText(node: DocNode): string {
@@ -120,8 +123,10 @@ export function ChatPanel() {
   const streamingRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  const [attachments, setAttachments] = useState<{ name: string; text: string }[]>([]);
+  const [attachments, setAttachments] = useState<Attached[]>([]);
   const [attachError, setAttachError] = useState("");
+  const [ctxOpen, setCtxOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const editor = useEditor();
   const focusId = editor?.focusId ?? null;
@@ -137,9 +142,32 @@ export function ChatPanel() {
       if (typeof selected !== "string") return;
       const ctx = await invoke<{ name: string; text: string }>("read_context", { path: selected });
       setAttachError("");
-      setAttachments((a) => [...a.filter((x) => x.name !== ctx.name), ctx]);
+      setAttachments((a) => [...a.filter((x) => x.path !== selected), { ...ctx, path: selected }]);
     } catch (e) {
       setAttachError(String(e));
+    }
+  }
+
+  // Rafraîchit le contexte : relit chaque document joint depuis le disque (au cas
+  // où le fichier a changé). Garde l'ancien contenu si une relecture échoue.
+  async function refreshContext() {
+    if (attachments.length === 0) return;
+    setRefreshing(true);
+    try {
+      const updated = await Promise.all(
+        attachments.map(async (a) => {
+          try {
+            const ctx = await invoke<{ name: string; text: string }>("read_context", { path: a.path });
+            return { ...ctx, path: a.path };
+          } catch {
+            return a;
+          }
+        }),
+      );
+      setAttachments(updated);
+      setAttachError("");
+    } finally {
+      setRefreshing(false);
     }
   }
   const focusPreview = useMemo(() => {
@@ -251,6 +279,67 @@ export function ChatPanel() {
             ? "Via ton « claude » local (ton abonnement/auth) — vérifie les CGU pour ton usage."
             : "⚠ « claude » introuvable : installe Claude Code et relance."}
         </p>
+
+        {/* Fenêtre de contexte : ce que voit l'assistant (doc + focus + docs joints). */}
+        <button
+          type="button"
+          onClick={() => setCtxOpen((v) => !v)}
+          className="mt-2 flex w-full items-center gap-1 text-[11px] text-muted hover:text-ink"
+        >
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${ctxOpen ? "" : "-rotate-90"}`} />
+          <span className="font-medium">Contexte</span>
+          <span className="text-faint">
+            {doc?.blocks.length ?? 0} blocs
+            {focusId ? " · focus" : ""}
+            {attachments.length > 0 ? ` · ${attachments.length} doc${attachments.length > 1 ? "s" : ""}` : ""}
+          </span>
+        </button>
+        {ctxOpen && (
+          <div className="mt-1.5 space-y-1.5 rounded-row bg-card p-2 text-[11px] text-muted ring-1 ring-line">
+            <div className="truncate">
+              <span className="text-ink">Document</span> : {doc?.meta.title?.trim() || "sans titre"} ·{" "}
+              {doc?.blocks.length ?? 0} blocs
+            </div>
+            <div className="flex items-center gap-1">
+              <Target className="h-3 w-3 shrink-0" />
+              {focusPreview ? (
+                <span className="truncate">{focusPreview.slice(0, 50)}</span>
+              ) : (
+                <span className="text-faint">aucun bloc ciblé</span>
+              )}
+            </div>
+            {attachments.length === 0 ? (
+              <div className="flex items-center gap-1 text-faint">
+                <Paperclip className="h-3 w-3 shrink-0" /> aucun document joint
+              </div>
+            ) : (
+              attachments.map((a) => (
+                <div key={a.path} className="flex items-center gap-1">
+                  <Paperclip className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{a.name}</span>
+                  <span className="shrink-0 text-faint">· {a.text.length} car.</span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachments((x) => x.filter((y) => y.path !== a.path))}
+                    title="Retirer"
+                    className="ml-auto shrink-0 hover:text-deny"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))
+            )}
+            <button
+              type="button"
+              onClick={() => void refreshContext()}
+              disabled={refreshing || attachments.length === 0}
+              className="flex items-center gap-1 text-coral hover:text-coral-ink disabled:opacity-40"
+            >
+              <RefreshCw className={`h-3 w-3 ${refreshing ? "motion-safe:animate-spin" : ""}`} /> Rafraîchir le
+              contexte
+            </button>
+          </div>
+        )}
       </div>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
@@ -282,17 +371,18 @@ export function ChatPanel() {
         <div className="mb-2 flex flex-wrap items-center gap-1">
           {attachments.map((a) => (
             <span
-              key={a.name}
+              key={a.path}
               className="flex items-center gap-1 rounded-pill bg-card px-2 py-0.5 text-[11px] text-muted ring-1 ring-line"
             >
-              📎 <span className="max-w-[120px] truncate">{a.name}</span>
+              <Paperclip className="h-3 w-3" />
+              <span className="max-w-[120px] truncate">{a.name}</span>
               <button
                 type="button"
-                onClick={() => setAttachments((x) => x.filter((y) => y.name !== a.name))}
+                onClick={() => setAttachments((x) => x.filter((y) => y.path !== a.path))}
                 title="Retirer"
                 className="hover:text-deny"
               >
-                ✕
+                <X className="h-3 w-3" />
               </button>
             </span>
           ))}
@@ -300,15 +390,15 @@ export function ChatPanel() {
             type="button"
             onClick={() => void attach()}
             title="Joindre un document (md, txt, docx) en contexte"
-            className="rounded-pill px-2 py-0.5 text-[11px] text-muted ring-1 ring-line hover:bg-coral-soft hover:text-coral-ink"
+            className="inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[11px] text-muted ring-1 ring-line hover:bg-coral-soft hover:text-coral-ink"
           >
-            📎 + doc
+            <Paperclip className="h-3 w-3" /> doc
           </button>
         </div>
         {attachError && <p className="mb-2 text-[11px] text-deny">{attachError}</p>}
         {focusId && (
           <div className="mb-2 flex items-center gap-1.5 rounded-row bg-coral-soft px-2 py-1 text-xs text-coral-ink">
-            <span aria-hidden="true">🎯</span>
+            <Target className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">
               Focus : {focusPreview?.slice(0, 60) || "(bloc ciblé)"}
             </span>
@@ -316,9 +406,9 @@ export function ChatPanel() {
               type="button"
               onClick={() => editor?.setFocus(null)}
               title="Retirer le focus"
-              className="ml-auto rounded px-1 hover:bg-coral/20"
+              className="ml-auto rounded p-0.5 hover:bg-coral/20"
             >
-              ✕
+              <X className="h-3 w-3" />
             </button>
           </div>
         )}
@@ -342,9 +432,15 @@ export function ChatPanel() {
             type="button"
             onClick={() => void send()}
             disabled={busy || input.trim() === ""}
-            className="rounded-pill bg-coral px-3.5 py-1.5 text-sm font-medium text-white transition hover:brightness-105 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-pill bg-coral px-3.5 py-1.5 text-sm font-medium text-white transition hover:brightness-105 disabled:opacity-40"
           >
-            {busy ? "…" : "Envoyer"}
+            {busy ? (
+              "…"
+            ) : (
+              <>
+                <Send className="h-3.5 w-3.5" /> Envoyer
+              </>
+            )}
           </button>
         </div>
       </div>

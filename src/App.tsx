@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Editor } from "./editor/Editor";
 import { Spark } from "./Spark";
+import { Moon, Sun } from "./icons";
 
 // Wave 4 — édition directe. L'app monte l'`Editor` : le document vit côté Rust
 // (source de vérité) et chaque frappe, raccourci ou action de la barre d'outils
@@ -62,9 +63,9 @@ function App() {
             type="button"
             onClick={toggleTheme}
             title={theme === "dark" ? "Thème clair" : "Thème sombre"}
-            className="flex h-7 w-7 items-center justify-center rounded-pill text-sm text-muted hover:bg-coral-soft hover:text-coral-ink"
+            className="flex h-7 w-7 items-center justify-center rounded-pill text-muted hover:bg-coral-soft hover:text-coral-ink"
           >
-            {theme === "dark" ? "☀" : "☾"}
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
         </div>
       </header>
