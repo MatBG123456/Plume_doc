@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { Document, Node as DocNode, Run } from "../bindings";
 import { setSelection } from "./caret";
 import { useEditor } from "./EditorContext";
-import { charsToRuns, runsToChars, type StyledChar } from "./text";
-import { DEFAULT_MARKS } from "../render/marks";
+import { charsToRuns, runsToChars } from "./text";
+import { occurrences, replaceRanges } from "./search";
 
 // Recherche / remplacement dans le document (Wave 8). Les correspondances sont
 // calculées sur le **modèle** (texte concaténé des blocs textuels), surlignées
@@ -28,46 +28,6 @@ function nodeRuns(node: DocNode): Run[] | null {
 function blockText(node: DocNode): string | null {
   const runs = nodeRuns(node);
   return runs ? runs.map((r) => r.text).join("") : null;
-}
-
-/** Occurrences (offsets en code points) de `query` dans `text`, insensible à la casse. */
-function occurrences(text: string, query: string): { start: number; end: number }[] {
-  const hay = Array.from(text.toLowerCase());
-  const needle = Array.from(query.toLowerCase());
-  const out: { start: number; end: number }[] = [];
-  if (needle.length === 0) return out;
-  for (let i = 0; i + needle.length <= hay.length; i += 1) {
-    let ok = true;
-    for (let j = 0; j < needle.length; j += 1) {
-      if (hay[i + j] !== needle[j]) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) out.push({ start: i, end: i + needle.length });
-  }
-  return out;
-}
-
-/** Remplace des plages (triées, disjointes) de caractères par `replacement`. */
-function replaceRanges(
-  chars: StyledChar[],
-  ranges: { start: number; end: number }[],
-  replacement: string,
-): StyledChar[] {
-  const repl = Array.from(replacement);
-  const out: StyledChar[] = [];
-  let cursor = 0;
-  for (const r of ranges) {
-    if (r.start < cursor) continue; // plage chevauchante (ex. « aa » dans « aaa ») → ignorée
-    for (let i = cursor; i < r.start; i += 1) out.push(chars[i]);
-    // Marques héritées : du caractère de gauche, sinon de droite (tête de bloc).
-    const inherit = (r.start > 0 ? chars[r.start - 1]?.marks : chars[r.end]?.marks) ?? DEFAULT_MARKS;
-    for (const ch of repl) out.push({ ch, marks: inherit });
-    cursor = r.end;
-  }
-  for (let i = cursor; i < chars.length; i += 1) out.push(chars[i]);
-  return out;
 }
 
 export function SearchBar({ doc, onClose }: { doc: Document; onClose: () => void }) {
