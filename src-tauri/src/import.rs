@@ -3,7 +3,10 @@
 //! - **Markdown** (`pulldown-cmark`) : titres, paragraphes, listes (imbriquées),
 //!   blocs de code, tableaux, gras/italique/barré/code/lien.
 //! - **.docx** (zip + `word/document.xml` via `quick-xml`) : titres (styles
-//!   Heading), paragraphes, listes (best-effort), gras/italique/souligné/barré.
+//!   Heading), paragraphes, **tableaux** (`w:tbl`), listes (niveau via `ilvl`),
+//!   gras/italique/souligné/barré, **couleur** (`w:color`) et **hyperliens**
+//!   (`w:hyperlink` résolu via `document.xml.rels`). *(L'ordonné des listes —
+//!   puce vs numéro — n'est pas distingué : il faudrait lire `numbering.xml`.)*
 //!
 //! Ces conversions sont *lossy* par nature : ce qui n'est pas représentable dans
 //! le modèle est ignoré. Le résultat est un `Document` typé, prêt pour le
@@ -287,7 +290,35 @@ pub fn from_docx(bytes: &[u8]) -> Result<Document, String> {
         .map_err(|e| format!("word/document.xml absent : {e}"))?
         .read_to_string(&mut xml)
         .map_err(|e| e.to_string())?;
-    Ok(docx_xml_to_document(&xml))
+    // Relations (rId → cible) pour résoudre les hyperliens externes (best-effort).
+    let mut rels = std::collections::HashMap::new();
+    if let Ok(mut f) = zip.by_name("word/_rels/document.xml.rels") {
+        let mut s = String::new();
+        if f.read_to_string(&mut s).is_ok() {
+            rels = parse_rels(&s);
+        }
+    }
+    Ok(docx_xml_to_document(&xml, &rels))
+}
+
+/// `document.xml.rels` → map `rId` → cible (URL d'hyperlien externe, etc.).
+fn parse_rels(xml: &str) -> std::collections::HashMap<String, String> {
+    use quick_xml::events::Event as Xml;
+    use quick_xml::reader::Reader;
+    let mut reader = Reader::from_str(xml);
+    let mut map = std::collections::HashMap::new();
+    loop {
+        match reader.read_event() {
+            Ok(Xml::Start(e)) | Ok(Xml::Empty(e)) if e.name().as_ref() == b"Relationship" => {
+                if let (Some(id), Some(target)) = (attr_val(&e, b"Id"), attr_val(&e, b"Target")) {
+                    map.insert(id, target);
+                }
+            }
+            Ok(Xml::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    map
 }
 
 fn attr_val(e: &quick_xml::events::BytesStart, key: &[u8]) -> Option<String> {
@@ -308,7 +339,17 @@ fn on_off(e: &quick_xml::events::BytesStart) -> bool {
     )
 }
 
-fn docx_xml_to_document(xml: &str) -> Document {
+/// `w:color` w:val (6 hex) → "#RRGGBB" ; "auto"/invalide → None.
+fn hex_color(v: String) -> Option<String> {
+    let v = v.trim_start_matches('#');
+    if v.len() == 6 && v.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(format!("#{}", v.to_uppercase()))
+    } else {
+        None
+    }
+}
+
+fn docx_xml_to_document(xml: &str, rels: &std::collections::HashMap<String, String>) -> Document {
     use quick_xml::events::Event as Xml;
     use quick_xml::reader::Reader;
 
@@ -319,20 +360,39 @@ fn docx_xml_to_document(xml: &str) -> Document {
     let mut runs: Vec<Run> = Vec::new();
     let mut heading: Option<u8> = None;
     let mut is_list = false;
+    let mut list_level: u8 = 0;
     // run courant
     let (mut bold, mut italic, mut underline, mut strike) = (false, false, false, false);
+    let mut color: Option<String> = None;
     let mut in_text = false;
     let mut run_text = String::new();
+    let mut link: Option<String> = None; // hyperlien courant
+                                         // tableaux (contenu d'une cellule accumulé dans `runs`)
+    let mut in_cell = false;
+    let mut table_rows: Vec<Vec<Cell>> = Vec::new();
+    let mut table_row: Vec<Cell> = Vec::new();
 
     loop {
         match reader.read_event() {
             Ok(Xml::Start(e)) | Ok(Xml::Empty(e)) => match e.name().as_ref() {
-                b"w:p" => {
+                b"w:tbl" => table_rows.clear(),
+                b"w:tr" => table_row.clear(),
+                b"w:tc" => {
+                    in_cell = true;
                     runs.clear();
-                    heading = None;
-                    is_list = false;
                 }
-                b"w:pStyle" => {
+                b"w:p" => {
+                    if !in_cell {
+                        runs.clear();
+                        heading = None;
+                        is_list = false;
+                        list_level = 0;
+                    }
+                }
+                b"w:hyperlink" => {
+                    link = attr_val(&e, b"r:id").and_then(|id| rels.get(&id).cloned());
+                }
+                b"w:pStyle" if !in_cell => {
                     if let Some(v) = attr_val(&e, b"w:val") {
                         let low = v.to_ascii_lowercase();
                         if let Some(n) = low.strip_prefix("heading") {
@@ -349,17 +409,25 @@ fn docx_xml_to_document(xml: &str) -> Document {
                     }
                 }
                 b"w:numPr" => is_list = true,
+                b"w:ilvl" => {
+                    list_level = attr_val(&e, b"w:val")
+                        .and_then(|v| v.parse::<u8>().ok())
+                        .unwrap_or(0)
+                        .min(5);
+                }
                 b"w:r" => {
                     bold = false;
                     italic = false;
                     underline = false;
                     strike = false;
+                    color = None;
                     run_text.clear();
                 }
                 b"w:b" => bold = on_off(&e),
                 b"w:i" => italic = on_off(&e),
                 b"w:u" => underline = on_off(&e),
                 b"w:strike" => strike = on_off(&e),
+                b"w:color" => color = attr_val(&e, b"w:val").and_then(hex_color),
                 b"w:t" => in_text = true,
                 b"w:br" => run_text.push('\n'),
                 b"w:tab" => run_text.push('\t'),
@@ -381,12 +449,15 @@ fn docx_xml_to_document(xml: &str) -> Document {
                                 italic,
                                 underline,
                                 strike,
+                                link: link.clone(),
+                                color: color.clone(),
                                 ..Default::default()
                             },
                         });
                     }
                 }
-                b"w:p" => {
+                b"w:hyperlink" => link = None,
+                b"w:p" if !in_cell => {
                     let taken = merge_runs(std::mem::take(&mut runs));
                     if let Some(level) = heading {
                         let text: String = taken.iter().map(|r| r.text.as_str()).collect();
@@ -399,12 +470,26 @@ fn docx_xml_to_document(xml: &str) -> Document {
                         if !taken.is_empty() {
                             blocks.push(Block::new(Node::ListItem {
                                 ordered: false,
-                                level: 0,
+                                level: list_level,
                                 runs: taken,
                             }));
                         }
                     } else if !taken.is_empty() {
                         blocks.push(Block::new(Node::Paragraph { runs: taken }));
+                    }
+                }
+                b"w:tc" => {
+                    in_cell = false;
+                    table_row.push(Cell {
+                        runs: merge_runs(std::mem::take(&mut runs)),
+                    });
+                }
+                b"w:tr" => table_rows.push(std::mem::take(&mut table_row)),
+                b"w:tbl" => {
+                    if !table_rows.is_empty() {
+                        blocks.push(Block::new(Node::Table {
+                            rows: std::mem::take(&mut table_rows),
+                        }));
                     }
                 }
                 _ => {}
@@ -474,6 +559,11 @@ pub fn read_context(path: String) -> Result<ContextDoc, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Parse un `document.xml` sans relations (pas d'hyperliens).
+    fn docx(xml: &str) -> Document {
+        docx_xml_to_document(xml, &std::collections::HashMap::new())
+    }
 
     #[test]
     fn markdown_titres_listes_code() {
@@ -554,7 +644,7 @@ mod tests {
             <w:p><w:r><w:rPr><w:b/></w:rPr><w:t>gras</w:t></w:r><w:r><w:t> normal</w:t></w:r></w:p>
             <w:p><w:pPr><w:numPr><w:ilvl w:val="0"/></w:numPr></w:pPr><w:r><w:t>item</w:t></w:r></w:p>
         </w:body></w:document>"#;
-        let doc = docx_xml_to_document(xml);
+        let doc = docx(xml);
         assert_eq!(
             doc.meta.title, "Mon titre",
             "le 1er Heading1 devient le titre"
@@ -594,7 +684,7 @@ mod tests {
     #[test]
     fn docx_b_val_false_nest_pas_gras() {
         let xml = r#"<w:document xmlns:w="x"><w:body><w:p><w:r><w:rPr><w:b w:val="false"/></w:rPr><w:t>x</w:t></w:r></w:p></w:body></w:document>"#;
-        let doc = docx_xml_to_document(xml);
+        let doc = docx(xml);
         let para = doc
             .blocks
             .iter()
@@ -604,5 +694,62 @@ mod tests {
             })
             .expect("un paragraphe");
         assert!(!para[0].marks.bold, "w:val=\"false\" ⇒ pas gras");
+    }
+
+    #[test]
+    fn docx_tableau_couleur_niveau() {
+        let xml = r#"<w:document xmlns:w="x"><w:body>
+            <w:tbl>
+                <w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc>
+                      <w:tc><w:p><w:r><w:t>B</w:t></w:r></w:p></w:tc></w:tr>
+                <w:tr><w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc>
+                      <w:tc><w:p><w:r><w:t>2</w:t></w:r></w:p></w:tc></w:tr>
+            </w:tbl>
+            <w:p><w:r><w:rPr><w:color w:val="FF0000"/></w:rPr><w:t>rouge</w:t></w:r></w:p>
+            <w:p><w:pPr><w:numPr><w:ilvl w:val="2"/></w:numPr></w:pPr><w:r><w:t>sous-item</w:t></w:r></w:p>
+        </w:body></w:document>"#;
+        let doc = docx(xml);
+        // Tableau 2×2.
+        let rows = doc
+            .blocks
+            .iter()
+            .find_map(|b| match &b.node {
+                Node::Table { rows } => Some(rows),
+                _ => None,
+            })
+            .expect("un tableau");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].len(), 2);
+        assert_eq!(rows[0][0].runs[0].text, "A");
+        // Couleur de run.
+        assert!(
+            doc.blocks
+                .iter()
+                .any(|b| matches!(&b.node, Node::Paragraph { runs }
+                if runs.iter().any(|r| r.marks.color.as_deref() == Some("#FF0000")))),
+            "couleur de run préservée",
+        );
+        // Niveau de liste depuis ilvl.
+        assert!(
+            doc.blocks
+                .iter()
+                .any(|b| matches!(&b.node, Node::ListItem { level: 2, .. })),
+            "niveau de liste (ilvl) préservé",
+        );
+    }
+
+    #[test]
+    fn docx_hyperlien_resolu_via_rels() {
+        let xml = r#"<w:document xmlns:w="x"><w:body>
+            <w:p><w:hyperlink r:id="rId7"><w:r><w:t>ici</w:t></w:r></w:hyperlink></w:p>
+        </w:body></w:document>"#;
+        let mut rels = std::collections::HashMap::new();
+        rels.insert("rId7".to_string(), "https://example.com".to_string());
+        let doc = docx_xml_to_document(xml, &rels);
+        assert!(
+            doc.blocks.iter().any(|b| matches!(&b.node, Node::Paragraph { runs }
+                if runs.iter().any(|r| r.text == "ici" && r.marks.link.as_deref() == Some("https://example.com")))),
+            "hyperlien résolu via les relations",
+        );
     }
 }

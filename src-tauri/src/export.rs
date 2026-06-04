@@ -520,4 +520,24 @@ mod tests {
         // Un .docx est un conteneur ZIP : signature « PK\x03\x04 ».
         assert_eq!(&bytes[..2], b"PK", "le .docx doit être un conteneur ZIP");
     }
+
+    #[test]
+    fn docx_export_contient_styles_texte_et_table() {
+        use std::io::{Cursor, Read};
+        let bytes = to_docx(&fixture()).expect("génération docx");
+        let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).expect("conteneur zip");
+        let mut xml = String::new();
+        zip.by_name("word/document.xml")
+            .expect("word/document.xml")
+            .read_to_string(&mut xml)
+            .unwrap();
+        // Le contenu (pas seulement une enveloppe ZIP valide) est correct :
+        assert!(xml.contains("Titre Démo"), "le titre est écrit");
+        assert!(xml.contains("Section"), "le texte du titre H2 est écrit");
+        assert!(
+            xml.contains("Heading2"),
+            "le style de titre Word (HeadingN) est référencé"
+        );
+        assert!(xml.contains("<w:tbl"), "le tableau est exporté (w:tbl)");
+    }
 }

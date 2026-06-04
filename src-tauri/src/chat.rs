@@ -646,4 +646,46 @@ mod tests {
         let resultat = json!({ "type": "result", "result": "fini" });
         assert_eq!(delta_text(&resultat), None);
     }
+
+    #[test]
+    fn claude_candidates_contient_claude() {
+        assert!(claude_candidates().contains(&"claude"));
+        if cfg!(windows) {
+            // Une install npm crée des shims `.cmd`/`.ps1` (pas de `.exe`).
+            assert!(claude_candidates().contains(&"claude.cmd"));
+        }
+    }
+
+    #[test]
+    fn claude_command_route_les_shims() {
+        use std::ffi::OsStr;
+        // `.cmd`/`.bat` → via `cmd /C`.
+        let c = claude_command(std::path::Path::new("/x/claude.cmd"));
+        let s = c.as_std();
+        assert_eq!(s.get_program(), OsStr::new("cmd"));
+        assert!(s
+            .get_args()
+            .any(|a| a.to_string_lossy().contains("claude.cmd")));
+        // `.ps1` → via `powershell -File`.
+        let c = claude_command(std::path::Path::new("/x/claude.ps1"));
+        let s = c.as_std();
+        assert_eq!(s.get_program(), OsStr::new("powershell"));
+        assert!(s.get_args().any(|a| a == OsStr::new("-File")));
+        // Sinon (`.exe`/sans extension) → le binaire lui-même, sans wrapper.
+        let c = claude_command(std::path::Path::new("/x/claude.exe"));
+        assert_eq!(c.as_std().get_program(), OsStr::new("/x/claude.exe"));
+    }
+
+    #[test]
+    fn find_claude_respecte_l_override() {
+        // L'override `PLUME_CLAUDE_BIN` pointant un fichier existant prime.
+        let mut p = std::env::temp_dir();
+        p.push("plume_fake_claude_bin_test");
+        std::fs::write(&p, b"x").unwrap();
+        std::env::set_var("PLUME_CLAUDE_BIN", &p);
+        let found = find_claude();
+        std::env::remove_var("PLUME_CLAUDE_BIN");
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(found.as_deref(), Some(p.as_path()));
+    }
 }

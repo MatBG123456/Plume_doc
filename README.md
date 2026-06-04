@@ -234,7 +234,7 @@ Implémentée dans la command Tauri `chat_send` — **Claude Code local uniqueme
 - **Export Markdown** : mapping pur du modèle (`to_markdown`).
 - **Export `.docx`** : via `docx-rs`, avec de **vrais styles Word** (Title, Heading 1–6 → volet Navigation / table des matières).
 - **Export PDF** : impression du webview (réutilise le renderer ; CSS `print:`).
-- **Import Markdown / `.docx`** *(livré)* : `pulldown-cmark` pour le MD (titres, listes imbriquées, code, tableaux, marques) ; `.docx` lu via `zip` + `quick-xml` (best-effort). Disponible via **Importer**, en **glisser-déposer** sur la fenêtre, et comme **pièce de contexte** du chat (`import.rs`).
+- **Import Markdown / `.docx`** *(livré)* : `pulldown-cmark` pour le MD (titres, listes imbriquées, code, tableaux, marques) ; `.docx` lu via `zip` + `quick-xml` (titres, paragraphes, **tableaux**, listes avec niveau, gras/italique/souligné/barré, **couleur**, **hyperliens** via les relations). Disponible via **Importer**, en **glisser-déposer** sur la fenêtre, et comme **pièce de contexte** du chat (`import.rs`).
 - **Import PDF** : *reporté* (extracteur lourd, texte peu structuré).
 
 ## Démarrage
