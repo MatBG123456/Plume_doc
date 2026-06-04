@@ -34,21 +34,21 @@ Plume est le premier volet d'une suite bureautique **Atelier** :
 Plume repose sur une **architecture B** : Claude n'écrit **jamais** de fichier brut. Il émet des **opérations structurées**, validées contre un schéma typé, puis appliquées par un cœur Rust.
 
 - **Source de vérité** : un modèle de document typé en Rust, sérialisé en JSON natif (`.plume.json`).
-- Claude reçoit l'**état du document** + une boîte d'**outils = opérations**. Il renvoie des `tool_use`. Le cœur Rust **valide** chaque opération puis l'**applique** via un *reducer* pur. Une opération invalide est renvoyée en `tool_result` d'erreur → Claude se corrige seul.
+- Claude reçoit l'**état du document** + la liste des **opérations** possibles. Il répond par une brève prose **puis** un bloc `json` `{"ops":[…]}`. Le cœur Rust **valide** chaque opération puis l'**applique** via un *reducer* pur ; une opération refusée est signalée à l'utilisateur.
 - **UX hybride** : la frappe directe dans l'interface produit *exactement les mêmes opérations* que le chat. Undo, redo et collaboration sont donc uniformes. On ne tape pas tout au chat ; le chat sert au génératif, à la transformation et aux opérations en masse.
 
 ```
-┌──────────┐   tool_use (Op)   ┌───────────────────────────┐
-│  Claude  │ ────────────────▶ │  plume-core (Rust)        │
-│ (API)    │                   │  validate → apply → inverse│
-│          │ ◀──────────────── │  (reducer pur, sans I/O)  │
-└──────────┘   tool_result     └───────────┬───────────────┘
-                                           │ events (preview live)
-                                           ▼
-                                ┌───────────────────────┐
-                                │  UI React (renderer)  │
-                                │  frappe → mêmes Ops   │
-                                └───────────────────────┘
+┌──────────────┐  prose + {ops}  ┌───────────────────────────┐
+│  claude -p   │ ──────────────▶ │  plume-core (Rust)        │
+│ (CLI local)  │                 │  validate → apply → inverse│
+│              │                 │  (reducer pur, sans I/O)  │
+└──────────────┘                 └───────────┬───────────────┘
+                                             │ events (preview live)
+                                             ▼
+                                  ┌───────────────────────┐
+                                  │  UI React (renderer)  │
+                                  │  frappe → mêmes Ops   │
+                                  └───────────────────────┘
 ```
 
 ## Pourquoi cette architecture
@@ -111,7 +111,7 @@ Plume_doc/
 │
 ├── src-tauri/                 # Shell Tauri (cœur Rust + webview)
 │   ├── src/lib.rs             # commands : ping, get_document, apply_op, undo, redo, save/open, export
-│   ├── src/chat.rs            # boucle agent (Claude Code CLI / Anthropic) + 8 outils
+│   ├── src/chat.rs            # boucle agent (Claude Code CLI local) : prompt → prose + ops
 │   ├── src/persist.rs         # open/save .plume.json (atomique) + schema_version + set_document
 │   ├── src/import.rs          # import Markdown (pulldown-cmark) + .docx (zip + quick-xml)
 │   ├── src/export.rs          # export Markdown + .docx (docx-rs, styles Word)
@@ -211,22 +211,23 @@ Le ciblage se fait **par `BlockId`**, jamais par offset global fragile. Le `rang
 
 ## Boucle agent
 
-Implémentée dans la command Tauri `chat_send` :
+Implémentée dans la command Tauri `chat_send` — **Claude Code local uniquement** :
 
 ```
-1. messages = historique ; tools = [un outil par variante d'Op]
-2. POST https://api.anthropic.com/v1/messages  (stream SSE)  — header x-api-key côté Rust uniquement
-3. Collecte les blocs `text` (→ event "assistant_text") et `tool_use`
-4. Pour chaque tool_use :
-     op = parse(tool_use.input)
+1. prompt = consignes + OPS_HELP + document (JSON) + focus/contexte + conversation
+2. spawn `claude -p --output-format stream-json --include-partial-messages
+         --model <m> --effort <e>`  ; le prompt est écrit sur stdin
+3. lecture NDJSON ligne par ligne :
+     - deltas de texte    → event "assistant_text" (prose au fil de l'eau, jusqu'au bloc ```)
+     - event `result`     → texte final fiable
+4. extraction du bloc ```json {"ops":[…]}``` ; pour chaque op :
      match validate(op, &state):
-       Ok  -> state = apply(op, state); push undo_stack(inverse(op));
-              event "op_applied" (preview live); tool_result = { ok:true, doc_version }
-       Err -> tool_result = { ok:false, reason }
-5. Append (assistant turn) + (user turn = tool_results); reboucle tant que stop_reason != "end_turn"
+       Ok  -> state = apply(op, state); push undo_stack(inverse(op)); event "op_applied" (preview live)
+       Err -> op signalée à l'utilisateur (les autres s'appliquent)
+5. event "assistant_done" ; l'historique (prose) est renvoyé au front
 ```
 
-**Garde-fous** : aucune écriture disque par le modèle ; seules les opérations validées mutent l'état ; tout passe par `apply`.
+**Garde-fous** : aucune écriture disque par le modèle ; seules les opérations validées mutent l'état ; tout passe par `apply` ; pendant un tour, `set_document` (bascule d'onglet) est refusé (verrou `agent_busy`). Le binaire `claude` est fourni/authentifié par l'utilisateur (son abonnement) — aucune clé API.
 
 ## Export / Import
 
@@ -238,7 +239,7 @@ Implémentée dans la command Tauri `chat_send` :
 
 ## Démarrage
 
-Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Depuis la **Wave 5**, un panneau de chat (`chat_send`) pilote l'édition via Claude : l'API Anthropic est appelée **côté Rust** en streaming, chaque `tool_use` (8 outils = 8 ops) est validé puis appliqué par le **même** pipeline, avec preview live. Le chat passe **exclusivement par Claude Code local** : il délègue au binaire `claude` que l'utilisateur a lui-même installé et authentifié — **pas de clé API ni de sélecteur de fournisseur** dans l'UI (on choisit seulement **modèle** et **effort**, et on peut fournir des **documents en contexte**). ⚠️ Ce mode utilise l'auth/abonnement de l'utilisateur : router des requêtes via un abonnement est encadré par les [CGU d'Anthropic](https://www.anthropic.com/legal) (plutôt usage interactif) — à chacun de vérifier la conformité de son usage. *(Le code conserve une voie API Anthropic, mais elle n'est pas exposée dans l'interface.)* Depuis la **Wave 6**, on ouvre/enregistre des `.plume.json` (sélecteur natif, écriture atomique côté Rust) avec **autosave** débouncé et flush à la fermeture (Ctrl/Cmd+S / +O). Depuis la **Wave 7**, on exporte en **Markdown** et **`.docx`** (mapping Rust) et en **PDF** (impression du webview, qui réutilise le renderer). La **Wave 8** ajoute le polish : undo/redo (Ctrl+Z/Y, avec coalescing de la frappe en une étape), palette de commandes (Ctrl+K) et recherche dans le document (Ctrl+F). Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
+Le scaffold **Wave 0** est en place : l'app se lance et le `ping` traverse webview → Tauri → `plume-core`. Depuis la **Wave 3**, le renderer (`src/render/`) affiche un document fidèlement ; depuis la **Wave 4**, le document vit côté Rust (commands `get_document` / `apply_op`) et l'édition directe (frappe, Entrée, barre d'outils) passe par le pipeline d'opérations. Depuis la **Wave 5**, un panneau de chat (`chat_send`) pilote l'édition via Claude : le binaire `claude` local est appelé **côté Rust** en streaming ; sa réponse (prose + bloc `json` d'ops) est validée puis appliquée par le **même** pipeline, avec preview live. Le chat passe **exclusivement par Claude Code local** : il délègue au binaire `claude` que l'utilisateur a lui-même installé et authentifié — **pas de clé API ni de sélecteur de fournisseur** dans l'UI (on choisit seulement **modèle** et **effort**, et on peut fournir des **documents en contexte**). ⚠️ Ce mode utilise l'auth/abonnement de l'utilisateur : router des requêtes via un abonnement est encadré par les [CGU d'Anthropic](https://www.anthropic.com/legal) (plutôt usage interactif) — à chacun de vérifier la conformité de son usage. Depuis la **Wave 6**, on ouvre/enregistre des `.plume.json` (sélecteur natif, écriture atomique côté Rust) avec **autosave** débouncé et flush à la fermeture (Ctrl/Cmd+S / +O). Depuis la **Wave 7**, on exporte en **Markdown** et **`.docx`** (mapping Rust) et en **PDF** (impression du webview, qui réutilise le renderer). La **Wave 8** ajoute le polish : undo/redo (Ctrl+Z/Y, avec coalescing de la frappe en une étape), palette de commandes (Ctrl+K) et recherche dans le document (Ctrl+F). Hors Tauri (`npm run dev` seul), l'app retombe sur la fixture en lecture seule.
 
 ### Prérequis
 

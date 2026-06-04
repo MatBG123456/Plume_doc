@@ -20,8 +20,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 use crate::Shared;
 
-/// Un message de conversation, au format de l'API Anthropic (`content` = tableau
-/// de blocs `text` / `tool_use` / `tool_result`).
+/// Un message de conversation : `role` + `content` = tableau de blocs `text`
+/// (`{"type":"text","text":…}`). Seul le texte est conservé.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
