@@ -38,6 +38,13 @@ pub struct ChatMessage {
     pub content: Value,
 }
 
+/// Document fourni en contexte au chat (joint par l'utilisateur).
+#[derive(Debug, Clone, Deserialize)]
+pub struct Attachment {
+    pub name: String,
+    pub text: String,
+}
+
 // ---------------------------------------------------------------------------
 // Surface d'outils : 1 op ⇒ 1 outil (input_schema = champs de la variante)
 // ---------------------------------------------------------------------------
@@ -677,8 +684,13 @@ fn focus_hint(doc: &Document, id: &str) -> Option<String> {
 }
 
 /// Construit le prompt unique envoyé à `claude -p`. `focus` = id de bloc ciblé
-/// par l'utilisateur (priorité), s'il y en a un.
-fn build_cli_prompt(doc: &Document, messages: &[ChatMessage], focus: Option<&str>) -> String {
+/// par l'utilisateur (priorité) ; `attachments` = documents fournis en contexte.
+fn build_cli_prompt(
+    doc: &Document,
+    messages: &[ChatMessage],
+    focus: Option<&str>,
+    attachments: &[Attachment],
+) -> String {
     let doc_json = serde_json::to_string_pretty(doc).unwrap_or_default();
     let transcript = messages
         .iter()
@@ -694,6 +706,18 @@ Concentre tes modifications sur ce bloc en priorité (sauf si la demande impliqu
             )
         })
         .unwrap_or_default();
+    let context_section = if attachments.is_empty() {
+        String::new()
+    } else {
+        let mut s = String::from(
+            "\n\nDOCUMENTS FOURNIS EN CONTEXTE par l'utilisateur (référence ; n'édite le document \
+courant que si la demande l'implique) :",
+        );
+        for a in attachments {
+            s.push_str(&format!("\n\n--- {} ---\n{}", a.name, a.text));
+        }
+        s
+    };
     format!(
         "Tu es l'assistant d'édition de Plume, un éditeur de documents. Tu modifies le document \
 UNIQUEMENT en émettant des opérations. Cible les blocs existants par leur `id` ; pour InsertBlock, \
@@ -703,7 +727,7 @@ Réponds EXACTEMENT dans cet ordre :\n\
 2) puis, sur une NOUVELLE ligne, un bloc de code ```json contenant {{\"ops\": [<op>, ...]}} \
 (liste vide si aucune édition). N'écris RIEN après ce bloc.\n\n\
 {OPS_HELP}\n\n\
-Document actuel (JSON) :\n{doc_json}{focus_section}\n\n\
+Document actuel (JSON) :\n{doc_json}{focus_section}{context_section}\n\n\
 Conversation :\n{transcript}"
     )
 }
@@ -763,6 +787,7 @@ async fn run_cli_agent(
     model: String,
     effort: String,
     focus: Option<String>,
+    attachments: Vec<Attachment>,
 ) -> Vec<ChatMessage> {
     let claude = match find_claude() {
         Some(p) => p,
@@ -779,7 +804,7 @@ async fn run_cli_agent(
         let s = state.lock().unwrap_or_else(|e| e.into_inner());
         s.doc.clone()
     };
-    let prompt = build_cli_prompt(&doc, &messages, focus.as_deref());
+    let prompt = build_cli_prompt(&doc, &messages, focus.as_deref(), &attachments);
 
     // Streaming : sortie NDJSON lue ligne par ligne. `claude -p` lit le prompt sur
     // stdin (évite les limites de longueur d'argument).
@@ -963,11 +988,22 @@ pub async fn chat_send(
     model: String,
     effort: String,
     focus: Option<String>,
+    attachments: Option<Vec<Attachment>>,
     app: AppHandle,
     state: tauri::State<'_, Shared>,
 ) -> Result<Vec<ChatMessage>, String> {
     if provider == "cli" {
-        return Ok(run_cli_agent(app, state.inner(), messages, model, effort, focus).await);
+        let attachments = attachments.unwrap_or_default();
+        return Ok(run_cli_agent(
+            app,
+            state.inner(),
+            messages,
+            model,
+            effort,
+            focus,
+            attachments,
+        )
+        .await);
     }
     // Défaut : API Anthropic (clé).
     let api_key = match std::env::var("ANTHROPIC_API_KEY") {
@@ -1096,13 +1132,32 @@ mod tests {
 
     #[test]
     fn prompt_cli_contient_doc_et_consignes() {
-        let prompt = build_cli_prompt(&plume_core::Document::empty(), &[], None);
+        let prompt = build_cli_prompt(&plume_core::Document::empty(), &[], None, &[]);
         assert!(prompt.contains("\"ops\""));
         assert!(prompt.contains("Document actuel"));
         assert!(prompt.contains("SetRuns"));
         assert!(
             !prompt.contains("PRIORITÉ"),
             "pas de section focus sans cible"
+        );
+        assert!(
+            !prompt.contains("CONTEXTE"),
+            "pas de section contexte sans pièce jointe"
+        );
+    }
+
+    #[test]
+    fn prompt_cli_attachments_ajoute_le_contexte() {
+        let att = vec![Attachment {
+            name: "notes.md".into(),
+            text: "Contenu de référence".into(),
+        }];
+        let prompt = build_cli_prompt(&plume_core::Document::empty(), &[], None, &att);
+        assert!(prompt.contains("CONTEXTE"), "section contexte présente");
+        assert!(prompt.contains("notes.md"), "nom du document joint");
+        assert!(
+            prompt.contains("Contenu de référence"),
+            "texte du document joint"
         );
     }
 
@@ -1115,7 +1170,7 @@ mod tests {
         });
         let id = block.id.0.clone();
         doc.blocks.push(block);
-        let prompt = build_cli_prompt(&doc, &[], Some(&id));
+        let prompt = build_cli_prompt(&doc, &[], Some(&id), &[]);
         assert!(
             prompt.contains("PRIORITÉ"),
             "la section focus doit apparaître"
@@ -1126,7 +1181,7 @@ mod tests {
             "aperçu du bloc ciblé"
         );
         // Un id inconnu n'ajoute pas de section (pas de plantage).
-        let p2 = build_cli_prompt(&doc, &[], Some("inconnu"));
+        let p2 = build_cli_prompt(&doc, &[], Some("inconnu"), &[]);
         assert!(!p2.contains("PRIORITÉ"));
     }
 }

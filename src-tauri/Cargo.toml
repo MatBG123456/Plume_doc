@@ -23,3 +23,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 futures-util = "0.3"
 docx-rs = "0.4"
 tokio = { version = "1", features = ["process", "io-util"] }
+# Import de documents : Markdown (pulldown-cmark), .docx (zip + XML quick-xml).
+pulldown-cmark = { version = "0.12", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"

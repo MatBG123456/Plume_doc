@@ -12,6 +12,7 @@ use plume_core::{apply, Block, Document, Meta, Node, Op, Run};
 
 mod chat;
 mod export;
+mod import;
 mod persist;
 
 /// État d'édition partagé entre toutes les commands.
@@ -166,6 +167,8 @@ pub fn run() {
             persist::save_document,
             persist::open_document,
             persist::set_document,
+            import::import_document,
+            import::read_context,
             export::export_markdown,
             export::export_docx
         ])

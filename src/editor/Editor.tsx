@@ -25,6 +25,9 @@ import { Spark } from "../Spark";
 // pendant un enregistrement ; un flush à la fermeture évite la perte d'édits.
 
 const FILTERS = [{ name: "Plume", extensions: ["json"] }];
+const IMPORT_FILTERS = [
+  { name: "Documents (md, txt, docx)", extensions: ["md", "markdown", "txt", "docx"] },
+];
 
 // Cache de session (localStorage) : permet de fermer sans enregistrer puis de
 // retrouver son travail au prochain lancement (récupération de brouillon).
@@ -211,6 +214,29 @@ export function Editor() {
       setSyncSignal((n) => n + 1); // rafraîchit tous les éditables sur le doc chargé
       setPath(selected);
       setDirty(false);
+      setError("");
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  // Importe un document externe (md/markdown/txt/docx) : Rust le convertit vers
+  // le modèle et remplace l'état d'édition. Pas de chemin (ce n'est pas un
+  // .plume.json) → marqué « non enregistré » pour inciter à enregistrer.
+  const importFile = useCallback(async () => {
+    if (dirtyRef.current) {
+      const ok = window.confirm("Des modifications non enregistrées seront perdues. Importer quand même ?");
+      if (!ok) return;
+    }
+    try {
+      const selected = await openDialog({ filters: IMPORT_FILTERS, multiple: false, directory: false });
+      if (typeof selected !== "string") return; // annulé
+      const loaded = await invoke<Document>("import_document", { path: selected });
+      rev.current += 1;
+      setDoc(loaded);
+      setSyncSignal((n) => n + 1);
+      setPath(null);
+      setDirty(true);
       setError("");
     } catch (e) {
       setError(String(e));
@@ -453,6 +479,7 @@ export function Editor() {
 
   const commands: Command[] = [
     { id: "open", label: "Ouvrir…", hint: "Ctrl+O", run: () => void openFile() },
+    { id: "import", label: "Importer (md, docx)…", run: () => void importFile() },
     { id: "save", label: "Enregistrer", hint: "Ctrl+S", run: saveCurrent },
     { id: "saveas", label: "Enregistrer sous…", run: () => void saveAsFile() },
     { id: "exp-md", label: "Exporter en Markdown", run: () => void exportMarkdown() },
@@ -472,6 +499,7 @@ export function Editor() {
             <div className="sticky top-[49px] z-10 bg-paper/95 backdrop-blur print:hidden">
               <div className="flex flex-wrap items-center gap-1 border-b border-line px-3 py-1.5 sm:px-4">
                 <FileButton onClick={() => void openFile()}>Ouvrir</FileButton>
+                <FileButton onClick={() => void importFile()}>Importer</FileButton>
                 <FileButton onClick={saveCurrent}>Enregistrer</FileButton>
                 <FileButton onClick={() => void saveAsFile()}>Enregistrer sous…</FileButton>
                 <span className="mx-1 h-5 w-px bg-line" />

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { Node as DocNode } from "../bindings";
 import { useEditor } from "./EditorContext";
 import { Spark } from "../Spark";
@@ -119,9 +120,28 @@ export function ChatPanel() {
   const streamingRef = useRef("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  const [attachments, setAttachments] = useState<{ name: string; text: string }[]>([]);
+  const [attachError, setAttachError] = useState("");
+
   const editor = useEditor();
   const focusId = editor?.focusId ?? null;
   const doc = editor?.doc;
+
+  async function attach() {
+    try {
+      const selected = await openDialog({
+        filters: [{ name: "Documents (md, txt, docx)", extensions: ["md", "markdown", "txt", "docx"] }],
+        multiple: false,
+        directory: false,
+      });
+      if (typeof selected !== "string") return;
+      const ctx = await invoke<{ name: string; text: string }>("read_context", { path: selected });
+      setAttachError("");
+      setAttachments((a) => [...a.filter((x) => x.name !== ctx.name), ctx]);
+    } catch (e) {
+      setAttachError(String(e));
+    }
+  }
   const focusPreview = useMemo(() => {
     if (!focusId || !doc) return null;
     const b = doc.blocks.find((x) => x.id === focusId);
@@ -189,6 +209,7 @@ export function ChatPanel() {
         model,
         effort,
         focus: focusId,
+        attachments,
       });
       setMessages(updated);
     } catch {
@@ -258,6 +279,33 @@ export function ChatPanel() {
       </div>
 
       <div className="border-t border-line p-3">
+        <div className="mb-2 flex flex-wrap items-center gap-1">
+          {attachments.map((a) => (
+            <span
+              key={a.name}
+              className="flex items-center gap-1 rounded-pill bg-card px-2 py-0.5 text-[11px] text-muted ring-1 ring-line"
+            >
+              📎 <span className="max-w-[120px] truncate">{a.name}</span>
+              <button
+                type="button"
+                onClick={() => setAttachments((x) => x.filter((y) => y.name !== a.name))}
+                title="Retirer"
+                className="hover:text-deny"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+          <button
+            type="button"
+            onClick={() => void attach()}
+            title="Joindre un document (md, txt, docx) en contexte"
+            className="rounded-pill px-2 py-0.5 text-[11px] text-muted ring-1 ring-line hover:bg-coral-soft hover:text-coral-ink"
+          >
+            📎 + doc
+          </button>
+        </div>
+        {attachError && <p className="mb-2 text-[11px] text-deny">{attachError}</p>}
         {focusId && (
           <div className="mb-2 flex items-center gap-1.5 rounded-row bg-coral-soft px-2 py-1 text-xs text-coral-ink">
             <span aria-hidden="true">🎯</span>
