@@ -18,7 +18,7 @@ use plume_core::{apply, Document, Op};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 use crate::Shared;
 
@@ -661,12 +661,13 @@ fn build_cli_prompt(doc: &Document, messages: &[ChatMessage]) -> String {
         "Tu es l'assistant d'édition de Plume, un éditeur de documents. Tu modifies le document \
 UNIQUEMENT en émettant des opérations. Cible les blocs existants par leur `id` ; pour InsertBlock, \
 génère un id unique nouveau.\n\n\
-Tu DOIS répondre par UN SEUL objet JSON, sans aucun texte ni balise autour, de la forme :\n\
-{{\"message\": \"<brève réponse en français>\", \"ops\": [<op>, ...]}}  (\"ops\" peut être vide).\n\n\
+Réponds EXACTEMENT dans cet ordre :\n\
+1) une phrase brève en français décrivant ce que tu fais (ou ta réponse à la demande) ;\n\
+2) puis, sur une NOUVELLE ligne, un bloc de code ```json contenant {{\"ops\": [<op>, ...]}} \
+(liste vide si aucune édition). N'écris RIEN après ce bloc.\n\n\
 {OPS_HELP}\n\n\
 Document actuel (JSON) :\n{doc_json}\n\n\
-Conversation :\n{transcript}\n\n\
-Réponds maintenant par l'objet JSON {{\"message\":..., \"ops\":[...]}} et RIEN d'autre."
+Conversation :\n{transcript}"
     )
 }
 
@@ -702,9 +703,22 @@ fn extract_json_object(s: &str) -> Option<&str> {
     None
 }
 
-/// Provider CLI : un appel à `claude`, puis application des ops du JSON renvoyé.
-/// `model` (alias `sonnet`/`opus`/…) et `effort` (low/medium/high/xhigh/max) sont
-/// passés au CLI s'ils sont fournis.
+/// Extrait le texte d'un delta du flux `stream-json` (formes tolérées).
+fn delta_text(v: &Value) -> Option<&str> {
+    v.get("event")
+        .and_then(|e| e.get("delta"))
+        .and_then(|d| d.get("text"))
+        .and_then(|t| t.as_str())
+        .or_else(|| {
+            v.get("delta")
+                .and_then(|d| d.get("text"))
+                .and_then(|t| t.as_str())
+        })
+}
+
+/// Provider CLI : appelle `claude` en **streaming** (NDJSON), émet le texte au fil
+/// de l'eau et applique les ops du bloc JSON final. `model` (alias `sonnet`/…) et
+/// `effort` (low/medium/high/xhigh/max) sont passés au CLI s'ils sont fournis.
 async fn run_cli_agent(
     app: AppHandle,
     state: &Shared,
@@ -717,7 +731,7 @@ async fn run_cli_agent(
         None => {
             emit_error(
                 &app,
-                "Claude Code (`claude`) introuvable. Installe-le, ou choisis « clé API ».",
+                "Claude Code (`claude`) introuvable. Installe-le et relance.",
             );
             return messages;
         }
@@ -729,9 +743,14 @@ async fn run_cli_agent(
     };
     let prompt = build_cli_prompt(&doc, &messages);
 
-    // `claude -p` lit le prompt sur stdin (évite les limites de longueur d'arg).
+    // Streaming : sortie NDJSON lue ligne par ligne. `claude -p` lit le prompt sur
+    // stdin (évite les limites de longueur d'argument).
     let mut cmd = claude_command(&claude);
-    cmd.arg("-p").arg("--output-format").arg("text");
+    cmd.arg("-p")
+        .arg("--output-format")
+        .arg("stream-json")
+        .arg("--verbose")
+        .arg("--include-partial-messages");
     if !model.trim().is_empty() {
         cmd.arg("--model").arg(model.trim());
     }
@@ -750,57 +769,111 @@ async fn run_cli_agent(
         }
     };
 
-    // Écrire stdin dans une tâche dédiée pendant que `wait_with_output` draine
-    // stdout/stderr en parallèle — sinon un gros document peut saturer le pipe et
-    // provoquer un inter-blocage.
+    // stdin écrit dans une tâche dédiée (anti inter-blocage avec le drain stdout).
     if let Some(mut stdin) = child.stdin.take() {
         tokio::spawn(async move {
             let _ = stdin.write_all(prompt.as_bytes()).await;
             let _ = stdin.shutdown().await; // EOF
         });
     }
+    // stderr drainé en tâche (pour le pipe + un message d'erreur éventuel).
+    let stderr_task = tokio::spawn({
+        let stderr = child.stderr.take();
+        async move {
+            let mut s = String::new();
+            if let Some(mut se) = stderr {
+                let _ = se.read_to_string(&mut s).await;
+            }
+            s
+        }
+    });
 
-    let out = match child.wait_with_output().await {
-        Ok(o) => o,
-        Err(e) => {
-            emit_error(&app, format!("claude a échoué : {e}"));
+    let stdout = match child.stdout.take() {
+        Some(o) => o,
+        None => {
+            emit_error(&app, "claude : sortie indisponible.");
             return messages;
         }
     };
 
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let detail = if !stderr.trim().is_empty() {
-            stderr.trim().to_string()
+    // Lit le flux : émet la PROSE en direct (jusqu'au bloc ```), accumule tout,
+    // et capture le `result` final (texte complet fiable).
+    let mut lines = BufReader::new(stdout).lines();
+    let mut streamed = String::new();
+    let mut emitted = 0usize;
+    let mut prose_emitted = false;
+    let mut fence_hit = false;
+    let mut result_text = String::new();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let v: Value = match serde_json::from_str(&line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(delta) = delta_text(&v) {
+            streamed.push_str(delta);
+            if !fence_hit {
+                if let Some(i) = streamed.find("```") {
+                    if i > emitted {
+                        let _ =
+                            app.emit("assistant_text", json!({ "text": &streamed[emitted..i] }));
+                        prose_emitted = true;
+                    }
+                    fence_hit = true;
+                    emitted = streamed.len();
+                } else {
+                    let _ = app.emit("assistant_text", json!({ "text": &streamed[emitted..] }));
+                    prose_emitted = true;
+                    emitted = streamed.len();
+                }
+            }
+        }
+        if let Some(r) = v.get("result").and_then(|r| r.as_str()) {
+            result_text = r.to_string();
+        }
+    }
+
+    let status = child.wait().await;
+    let stderr_out = stderr_task.await.unwrap_or_default();
+
+    if !matches!(&status, Ok(s) if s.success()) {
+        let code = status.ok().and_then(|s| s.code());
+        let detail = if !stderr_out.trim().is_empty() {
+            stderr_out.trim().chars().take(400).collect::<String>()
         } else {
-            stdout.chars().take(400).collect::<String>()
+            streamed.chars().take(400).collect::<String>()
         };
         emit_error(
             &app,
-            format!(
-                "claude a renvoyé une erreur (code {:?}) : {detail}",
-                out.status.code()
-            ),
+            format!("claude a renvoyé une erreur (code {code:?}) : {detail}"),
         );
         return messages;
     }
 
-    let parsed: Value =
-        match extract_json_object(&stdout).and_then(|j| serde_json::from_str(j).ok()) {
-            Some(v) => v,
-            None => {
-                emit_error(&app, "réponse de claude illisible (JSON attendu).");
-                return messages;
-            }
-        };
+    // Texte canonique : le `result` final s'il existe, sinon le flux accumulé.
+    let full = if result_text.is_empty() {
+        streamed.clone()
+    } else {
+        result_text
+    };
 
-    // Application best-effort : les ops valides sont appliquées, les invalides
-    // signalées (pas de boucle d'auto-correction sur ce chemin one-shot).
+    // Prose = texte avant le bloc ```json (ou avant le 1er objet JSON).
+    let prose: String = if let Some(i) = full.find("```") {
+        full[..i].trim().to_string()
+    } else if let Some(j) = full.find('{') {
+        full[..j].trim().to_string()
+    } else {
+        full.trim().to_string()
+    };
+
+    // Ops : le bloc {"ops":[...]} (1er objet JSON équilibré). Best-effort.
     let mut applied = 0usize;
     let mut errors: Vec<String> = Vec::new();
-    if let Some(ops) = parsed["ops"].as_array() {
-        for op_val in ops {
+    if let Some(ops) = extract_json_object(&full)
+        .and_then(|j| serde_json::from_str::<Value>(j).ok())
+        .and_then(|v| v.get("ops").cloned())
+        .and_then(|o| o.as_array().cloned())
+    {
+        for op_val in &ops {
             match serde_json::from_value::<Op>(op_val.clone()) {
                 Ok(op) => match apply_validated_op(&app, state, op, "cli") {
                     Ok(()) => applied += 1,
@@ -821,18 +894,17 @@ async fn run_cli_agent(
         );
     }
 
-    // Message affiché : celui de Claude, sinon un libellé si des ops ont été
-    // appliquées, sinon rien (pas de bulle vide persistée dans l'historique).
-    let model_msg = parsed["message"].as_str().unwrap_or("").trim().to_string();
-    let final_text = if !model_msg.is_empty() {
-        model_msg
+    // Message affiché : la prose, sinon un libellé si des ops, sinon rien.
+    let final_text = if !prose.is_empty() {
+        prose
     } else if applied > 0 {
         "Modifications appliquées.".to_string()
     } else {
         String::new()
     };
-    if !final_text.is_empty() {
-        let _ = app.emit("assistant_text", json!({ "text": final_text }));
+    // Si rien n'a été streamé en direct, on émet le texte final pour l'affichage.
+    if !prose_emitted && !final_text.is_empty() {
+        let _ = app.emit("assistant_text", json!({ "text": &final_text }));
     }
     let _ = app.emit("assistant_done", json!({}));
     if !final_text.is_empty() {

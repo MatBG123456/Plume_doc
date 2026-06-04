@@ -1,22 +1,28 @@
 /** @type {import('tailwindcss').Config} */
-// Design system « Perch » : ivoire chaud + accent corail unique, polices
-// Fraunces (serif) / Hanken Grotesk (sans) / JetBrains Mono (mono).
+// Design system « Perch ». Couleurs pilotées par des variables CSS (cf.
+// src/styles.css) pour le double thème clair/sombre : les classes (bg-paper,
+// text-ink, text-coral…) suivent automatiquement `[data-theme="dark"]`.
+// `paper`/`ink`/`coral` sont en canaux RGB → les modificateurs d'opacité
+// (bg-paper/80, bg-ink/[0.04], border-coral/40) fonctionnent.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        paper: "#F6F4EE",
-        card: "#FFFEFB",
-        ink: "#23211C",
-        muted: "#6F6B61",
-        faint: "#9A958A",
-        coral: { DEFAULT: "#CC6A44", soft: "#F4E3DA", ink: "#7C3A20" },
-        teal: { DEFAULT: "#1D9E75", soft: "#E1F5EE", ink: "#085041" },
-        amber: { soft: "#FAEEDA", ink: "#633806" },
-        deny: "#B23A2A",
-        ctx: "#5B8FC9",
-        line: "rgba(35,33,28,0.10)",
+        paper: "rgb(var(--paper) / <alpha-value>)",
+        ink: "rgb(var(--ink) / <alpha-value>)",
+        coral: {
+          DEFAULT: "rgb(var(--coral) / <alpha-value>)",
+          soft: "var(--coral-soft)",
+          ink: "var(--coral-ink)",
+        },
+        card: "var(--card)",
+        muted: "var(--muted)",
+        faint: "var(--faint)",
+        teal: { DEFAULT: "var(--teal)", ink: "var(--teal-ink)" },
+        deny: "var(--deny)",
+        ctx: "var(--ctx)",
+        line: "var(--line)",
       },
       fontFamily: {
         sans: ['"Hanken Grotesk"', "ui-sans-serif", "system-ui", "sans-serif"],

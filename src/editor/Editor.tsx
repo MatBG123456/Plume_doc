@@ -12,6 +12,7 @@ import { Toolbar } from "./Toolbar";
 import { ChatPanel } from "./ChatPanel";
 import { CommandPalette, type Command } from "./CommandPalette";
 import { SearchBar } from "./SearchBar";
+import { Spark } from "../Spark";
 
 // Racine de l'éditeur. Le document vit côté Rust (source de vérité) : on le
 // charge au montage, et chaque édition est une `Op` envoyée à `apply_op`. La
@@ -36,6 +37,7 @@ export function Editor() {
   const [saving, setSaving] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false); // tiroir chat sur petit écran
 
   const queue = useRef<Promise<void>>(Promise.resolve());
   const saveChain = useRef<Promise<void>>(Promise.resolve());
@@ -371,7 +373,7 @@ export function Editor() {
 
   const fileName = path ? path.split(/[\\/]/).pop() ?? path : "Brouillon";
   const status = saving ? "enregistrement…" : dirty ? "non enregistré" : path ? "enregistré" : "non enregistré";
-  const dot = saving ? "bg-coral" : !path || dirty ? "bg-faint/60" : "bg-teal";
+  const dot = saving ? "bg-coral" : !path || dirty ? "bg-faint" : "bg-teal";
 
   const commands: Command[] = [
     { id: "open", label: "Ouvrir…", hint: "Ctrl+O", run: () => void openFile() },
@@ -387,11 +389,12 @@ export function Editor() {
 
   return (
     <EditorContext.Provider value={api}>
-      <div className="flex items-start">
-        <div className="min-w-0 flex-1">
+      {/* Zone document : sur grand écran (lg) on réserve la largeur du chat. */}
+      <div className="lg:pr-[360px]">
+        <div className="min-w-0">
           {editable && (
             <div className="sticky top-[49px] z-10 bg-paper/95 backdrop-blur print:hidden">
-              <div className="flex items-center gap-1 border-b border-line px-4 py-1.5">
+              <div className="flex flex-wrap items-center gap-1 border-b border-line px-3 py-1.5 sm:px-4">
                 <FileButton onClick={() => void openFile()}>Ouvrir</FileButton>
                 <FileButton onClick={saveCurrent}>Enregistrer</FileButton>
                 <FileButton onClick={() => void saveAsFile()}>Enregistrer sous…</FileButton>
@@ -440,12 +443,35 @@ export function Editor() {
           )}
           <DocumentView doc={doc} />
         </div>
-        {editable && (
-          <aside className="sticky top-[49px] h-[calc(100vh-49px)] w-[360px] shrink-0 border-l border-line bg-paper print:hidden">
+      </div>
+
+      {/* Chat : panneau fixe à droite (desktop), tiroir coulissant (mobile). */}
+      {editable && (
+        <>
+          <aside
+            className={`fixed bottom-0 right-0 top-[49px] z-30 flex w-[min(360px,92vw)] flex-col border-l border-line bg-paper transition-transform lg:w-[360px] lg:translate-x-0 lg:shadow-none print:hidden ${
+              chatOpen ? "translate-x-0 shadow-pop" : "translate-x-full"
+            }`}
+          >
             <ChatPanel />
           </aside>
-        )}
-      </div>
+          {chatOpen && (
+            <div
+              className="fixed inset-0 z-20 bg-ink/20 lg:hidden print:hidden"
+              onClick={() => setChatOpen(false)}
+            />
+          )}
+          <button
+            type="button"
+            onClick={() => setChatOpen((v) => !v)}
+            title="Assistant"
+            className="fixed bottom-4 right-4 z-40 flex items-center gap-1.5 rounded-pill bg-coral px-4 py-2.5 text-sm font-medium text-white shadow-pop lg:hidden print:hidden"
+          >
+            <Spark className="h-4 w-4" /> Assistant
+          </button>
+        </>
+      )}
+
       {error && (
         <div className="fixed bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-pill bg-deny px-4 py-2 text-sm text-white shadow-soft print:hidden">
           {error}

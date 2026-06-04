@@ -73,7 +73,7 @@ export function CommandPalette({
                   exec(c);
                 }}
                 className={`flex w-full items-center justify-between px-4 py-2 text-left text-sm ${
-                  i === sel ? "bg-coral-soft text-coral-ink" : "text-ink hover:bg-coral-soft/50"
+                  i === sel ? "bg-coral-soft text-coral-ink" : "text-ink hover:bg-coral-soft"
                 }`}
               >
                 <span>{c.label}</span>

@@ -2,11 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design system « Perch ». Les couleurs sont pilotées par des variables CSS pour
+   permettre le double thème (clair par défaut, sombre via [data-theme="dark"]).
+   `paper`/`ink`/`coral` sont en canaux RGB (pour les modificateurs d'opacité
+   Tailwind) ; les autres sont des valeurs complètes. */
 :root {
-  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --paper: 246 244 238;
+  --ink: 35 33 28;
+  --coral: 204 106 68;
+  --card: #fffefb;
+  --muted: #6f6b61;
+  --faint: #9a958a;
+  --coral-soft: #f4e3da;
+  --coral-ink: #7c3a20;
+  --teal: #1d9e75;
+  --teal-ink: #085041;
+  --deny: #b23a2a;
+  --ctx: #5b8fc9;
+  --line: rgba(35, 33, 28, 0.1);
+
   color-scheme: light;
-  color: #23211c; /* ink */
-  background: #f6f4ee; /* paper */
+  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: rgb(var(--ink));
+  background: rgb(var(--paper));
+}
+
+:root[data-theme="dark"] {
+  --paper: 24 23 20;
+  --ink: 243 239 230;
+  --coral: 224 138 99;
+  --card: #211f1b;
+  --muted: rgba(243, 239, 230, 0.62);
+  --faint: rgba(243, 239, 230, 0.42);
+  --coral-soft: rgba(224, 138, 99, 0.16);
+  --coral-ink: #f0b79c;
+  --teal: #3fbf95;
+  --teal-ink: #8fe0c5;
+  --deny: #e2806a;
+  --ctx: #6ea8e6;
+  --line: rgba(243, 239, 230, 0.12);
+
+  color-scheme: dark;
 }
 
 /* Export PDF (impression du webview) : marge de page raisonnable. */
